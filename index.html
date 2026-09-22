@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>中秋快乐 · 代码洪流</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='42' fill='%23ffd98a'/%3E%3Ccircle cx='37' cy='37' r='9' fill='%23e8b45f' opacity='.6'/%3E%3Ccircle cx='62' cy='55' r='7' fill='%23e8b45f' opacity='.6'/%3E%3Ccircle cx='48' cy='64' r='5' fill='%23e8b45f' opacity='.6'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://miaoda.feishu.cn/fonts/css2?family=Noto+Serif+SC:wght@600;900&family=Noto+Sans+SC:wght@300;400;500&display=swap">
+<style>
+  :root {
+    --gold: #ffd98a;
+    --gold-deep: #f2b64c;
+    --txt: rgba(255, 240, 214, .92);
+    --muted: rgba(235, 220, 190, .55);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; overflow: hidden; background: #070b20; }
+  body {
+    font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: var(--txt);
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none; user-select: none;
+  }
+  canvas#rain {
+    position: fixed; inset: 0; width: 100%; height: 100%; display: block;
+    z-index: 1;
+  }
+  canvas#scene {
+    position: fixed; inset: 0; width: 100%; height: 100%; display: block;
+    touch-action: none; cursor: crosshair;
+    z-index: 2;
+  }
+  canvas#firework {
+    position: fixed; inset: 0; width: 100%; height: 100%; display: block;
+    pointer-events: none;
+    z-index: 3;
+    opacity: 0;
+    transition: opacity 1.5s ease;
+  }
+  canvas#firework.active {
+    opacity: 1;
+  }
+
+  /* ===== 顶部标 ===== */
+  .kicker {
+    position: fixed; top: max(18px, env(safe-area-inset-top)); left: 50%;
+    transform: translateX(-50%);
+    font-family: "Noto Serif SC", "Songti SC", serif;
+    font-weight: 600; font-size: 14px; letter-spacing: .62em; text-indent: .62em;
+    color: rgba(255, 230, 190, .62);
+    white-space: nowrap; pointer-events: none; z-index: 5;
+    text-shadow: 0 0 14px rgba(0,0,0,.55);
+    animation: kickIn 1.6s cubic-bezier(.22,1,.36,1) both;
+  }
+  @keyframes kickIn { from { opacity: 0; letter-spacing: 1em; } to { opacity: 1; letter-spacing: .62em; } }
+
+  /* ===== 开场遮罩 ===== */
+  .splash {
+    position: fixed; inset: 0; z-index: 9;
+    display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 42%, #0c1230 0%, #060a1e 70%);
+    transition: opacity 0.9s ease;
+    pointer-events: none;
+  }
+  .splash span {
+    font-family: "Noto Serif SC", "Songti SC", serif;
+    font-weight: 900; color: rgba(255, 217, 138, .96);
+    font-size: clamp(34px, 7vw, 62px);
+    letter-spacing: .42em; text-indent: .42em;
+    text-shadow: 0 0 30px rgba(255, 217, 138, .55), 0 0 80px rgba(255, 217, 138, .22);
+    animation: splashPulse 2s ease-in-out infinite;
+  }
+  .splash.done { opacity: 0; visibility: hidden; }
+  @keyframes splashPulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.045); opacity: .85; } }
+  @media (prefers-reduced-motion: reduce) { .splash span { animation: none; } }
+</style>
+</head>
+<body>
+<div class="splash" id="splash"><span>月满中秋</span></div>
+<canvas id="rain" aria-label="代码洪流背景"></canvas>
+<canvas id="scene" aria-label="中秋粒子动画"></canvas>
+<canvas id="firework" aria-label="赛博礼花彩蛋"></canvas>
+<div class="kicker">代码洪流 · 月下寄思</div>
+<audio id="bgm" src="assets/bgm.mp3" loop preload="metadata"></audio>
+
+<script>
+'use strict';
+/* ============================================================
+   皓月同心 · 中秋 —— 粒子月夜（升级版）
+   五句祝福轮播：中秋快乐 / 皓月同心 / 共赴婵娟 / 人月两团圆 / 花好月圆
+   过渡仪式：粒子汇聚成字 → 停留浮动 → 散成绕月光环 → 再聚新字
+   背景：深空 / 星野 / 月亮 / 孔明灯 / 桂花与星尘
+   交互：拖动拨动星尘、点击涟漪爆散、桌面端风铃
+   ============================================================ */
+
+const canvas = document.getElementById('scene');
+const ctx = canvas.getContext('2d');
+const rainCanvas = document.getElementById('rain');
+const rainCtx = rainCanvas.getContext('2d');
+const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+/* 开场遮罩：加载后立即淡出，不等字体 */
+const splash = document.getElementById('splash');
+setTimeout(() => splash.classList.add('done'), 700);
+setTimeout(() => splash.remove(), 1800);
+const TAU = Math.PI * 2;
+const SERIF = '"Noto Serif SC","Songti SC","STSong","SimSun",serif';
+
+let W = 0, H = 0, DPR = 1;
+
+/* ================= 句子与诗句（中秋十二联 + 对应意象） ================= */
+const SCENES = [
+  { text: '海上生明月，天涯共此时', art: 'sea' },
+  { text: '但愿人长久，千里共婵娟', art: 'rabbit' },
+  { text: '露从今夜白，月是故乡明', art: 'dew' },
+  { text: '今夜月明人尽望，不知秋思落谁家', art: 'gaze' },
+  { text: '秋空明月悬，光彩露沾湿', art: 'dew' },
+  { text: '圆魄上寒空，皆言四海同', art: 'fullmoon' },
+  { text: '明月出天山，苍茫云海间', art: 'mountain' },
+  { text: '春江潮水连海平，海上明月共潮生', art: 'tide' },
+  { text: '举头望明月，低头思故乡', art: 'gaze' },
+  { text: '中庭地白树栖鸦，冷露无声湿桂花', art: 'osmanthus' },
+  { text: '星垂平野阔，月涌大江流', art: 'river' },
+  { text: '月落乌啼霜满天，江枫渔火对愁眠', art: 'fishlight' },
+];
+let HOLD_MS = 5600; /* 每句停留时长：会按背景音乐时长重新计算 */
+const GATHER_MS = 2400, ORBIT_MS = 1600, ORBIT_HOLD_MS = 700, WAIT_MS = 2000;
+
+let idx = 0;
+let parts = [], targets = [];
+let state = 'init', stateT = 0, orbitArrived = false;
+let stars = [], lanterns = [], petals = [];
+let last = 0;
+const moon = { x: 0, y: 0, r: 0 };
+const cake = { cx: 0, cy: 0, R: 0 };
+
+function particleCount() {
+  return Math.min(3400, Math.max(1600, Math.round(W * H / 380)));
+}
+
+/* ================= 文字尺寸（诗句用） ================= */
+function computeFontSize(text) {
+  ctx.font = '900 120px ' + SERIF;
+  const ratio = ctx.measureText(text).width / 120;
+  return Math.max(15, Math.min(W * 0.92 / ratio, H * 0.07));
+}
+
+/* ================= 月饼造型（离屏绘制：面层 + 花纹层） ================= */
+function cakeLayout() {
+  cake.cx = W / 2;
+  cake.cy = H * (isTouch ? 0.46 : 0.462);
+  cake.R = Math.min(W, H) * (isTouch ? 0.235 : 0.215);
+}
+function paintMooncake(face, deco, S) {
+  const c = S / 2, R = S * 0.44, PETALS = 30;
+  const edgePath = (g) => {
+    g.beginPath();
+    const steps = PETALS * 4;
+    for (let i = 0; i <= steps; i++) {
+      const a = i / steps * TAU;
+      const rr = R * (1 + 0.05 * Math.sin(a * PETALS));
+      const x = c + Math.cos(a) * rr, y = c + Math.sin(a) * rr;
+      i === 0 ? g.moveTo(x, y) : g.lineTo(x, y);
+    }
+    g.closePath();
+  };
+  face.clearRect(0, 0, S, S);
+  face.fillStyle = '#fff';
+  edgePath(face); face.fill();
+  deco.clearRect(0, 0, S, S);
+  deco.strokeStyle = '#fff'; deco.fillStyle = '#fff'; deco.lineCap = 'round';
+  deco.lineWidth = S * 0.014;
+  edgePath(deco); deco.stroke();
+  deco.lineWidth = S * 0.018;
+  deco.beginPath(); deco.arc(c, c, R * 0.80, 0, TAU); deco.stroke();
+  deco.lineWidth = S * 0.010;
+  deco.beginPath(); deco.arc(c, c, R * 0.36, 0, TAU); deco.stroke();
+  for (let i = 0; i < 8; i++) {
+    deco.save(); deco.translate(c, c); deco.rotate(i / 8 * TAU);
+    deco.beginPath();
+    deco.ellipse(R * 0.57, 0, R * 0.21, R * 0.085, 0, 0, TAU);
+    deco.fill();
+    deco.restore();
+  }
+  deco.font = '900 ' + S * 0.44 + 'px "Noto Serif SC",serif';
+  deco.textAlign = 'center'; deco.textBaseline = 'middle';
+  deco.fillText('月', c, c + S * 0.02);
+}
+function sampleLayer(cv, cell) {
+  const w = cv.width, h = cv.height;
+  const g = cv.getContext('2d', { willReadFrequently: true });
+  const data = g.getImageData(0, 0, w, h).data;
+  const cols = Math.ceil(w / cell), rows = Math.ceil(h / cell);
+  const used = new Uint8Array(cols * rows);
+  const pts = [];
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (data[(y * w + x) * 4 + 3] > 110) {
+        const key = ((y / cell) | 0) * cols + ((x / cell) | 0);
+        if (!used[key]) { used[key] = 1; pts.push([x, y]); }
+      }
+    }
+  }
+  return pts;
+}
+function mooncakeTargets() {
+  cakeLayout();
+  const S = Math.ceil(cake.R * 2.35);
+  const face = document.createElement('canvas'), deco = document.createElement('canvas');
+  face.width = face.height = S; deco.width = deco.height = S;
+  const fc = face.getContext('2d'), dc = deco.getContext('2d');
+  paintMooncake(fc, dc, S);
+  const cellF = Math.max(2.4, Math.sqrt((S * S) / particleCount()));
+  const tg = [];
+  for (const p of sampleLayer(face, cellF)) tg.push({ x: cake.cx + p[0] - S / 2, y: cake.cy + p[1] - S / 2, hot: false });
+  for (const p of sampleLayer(deco, Math.max(2, cellF * 0.72))) tg.push({ x: cake.cx + p[0] - S / 2, y: cake.cy + p[1] - S / 2, hot: true });
+  return tg;
+}
+
+/* ================= 粒子（随机方向运动） ================= */
+function spawnParticle(tx, ty, hot) {
+  const side = (Math.random() * 4) | 0;
+  let x, y;
+  if (side === 0) { x = Math.random() * W; y = -20 - Math.random() * H * 0.15; }
+  else if (side === 1) { x = Math.random() * W; y = H + 20 + Math.random() * H * 0.15; }
+  else if (side === 2) { x = -20 - Math.random() * W * 0.15; y = Math.random() * H; }
+  else { x = W + 20 + Math.random() * W * 0.15; y = Math.random() * H; }
+  const g = Math.random();
+  return {
+    x, y, tx, ty,
+    vx: (Math.random() - 0.5) * 24, vy: (Math.random() - 0.5) * 24,
+    r: isTouch ? (0.8 + Math.random() * 1.2) : (0.9 + Math.random() * 1.5),
+    c: hot ? 'rgba(255,246,222,' : (g < 0.5 ? 'rgba(255,217,138,' : 'rgba(236,174,80,'),
+    ph: Math.random() * TAU, lk: Math.random(), kick: 0, hot: !!hot
+  };
+}
+function applyMooncake() {
+  targets = mooncakeTargets();
+  parts = new Array(targets.length);
+  for (let i = 0; i < targets.length; i++) {
+    const t = targets[i];
+    parts[i] = spawnParticle(t.x, t.y, t.hot);
+  }
+  state = 'wait'; stateT = 0; orbitArrived = false;
+}
+/* 句间切换：月饼粒子向随机方向轻微炸开再被拉回，如呼吸 */
+function kickCake(power) {
+  for (const p of parts) {
+    const a = Math.random() * TAU, v = power * (0.35 + Math.random() * 0.85);
+    p.vx += Math.cos(a) * v; p.vy += Math.sin(a) * v; p.kick = 1;
+  }
+}
+
+/* ================= 代码洪流（二进制 0/1 雨） ================= */
+const RAIN_CHARS = ['0', '1'];
+const codeRain = { cols: [], fs: 15 };
+function resetRain() {
+  codeRain.fs = isTouch ? 13 : 17;
+  const g = rainCtx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, '#060a1e');
+  g.addColorStop(0.52, '#0c1230');
+  g.addColorStop(1, '#181238');
+  rainCtx.fillStyle = g;
+  rainCtx.fillRect(0, 0, W, H);
+  const n = Math.ceil(W / codeRain.fs) + 1;
+  codeRain.cols = [];
+  for (let i = 0; i < n; i++) {
+    codeRain.cols.push({
+      x: i * codeRain.fs + codeRain.fs / 2,
+      y: -Math.random() * H,
+      sp: 0.9 + Math.random() * 2.2,
+      len: 5 + ((Math.random() * 8) | 0)
+    });
+  }
+}
+function drawRain() {
+  rainCtx.fillStyle = 'rgba(5,8,22,0.10)';
+  rainCtx.fillRect(0, 0, W, H);
+  rainCtx.font = 'bold ' + codeRain.fs + 'px "Noto Sans SC","Microsoft YaHei",monospace';
+  rainCtx.textAlign = 'center';
+  const maxA = isTouch ? 0.28 : 0.38;
+  for (const col of codeRain.cols) {
+    col.y += col.sp;
+    if (col.y - col.len * codeRain.fs > H) {
+      col.y = -Math.random() * H * 0.6;
+      col.sp = 0.9 + Math.random() * 2.2;
+      col.len = 5 + ((Math.random() * 8) | 0);
+    }
+    for (let i = 0; i < col.len; i++) {
+      const yy = col.y - i * codeRain.fs;
+      if (yy < -codeRain.fs || yy > H + codeRain.fs) continue;
+      const ch = RAIN_CHARS[(Math.random() * RAIN_CHARS.length) | 0];
+      const fade = 1 - i / col.len;
+      if (i === 0) rainCtx.fillStyle = 'rgba(255,222,150,' + (maxA * 0.95) + ')';
+      else if (Math.random() < 0.1) rainCtx.fillStyle = 'rgba(130,230,200,' + (maxA * fade * 0.8) + ')';
+      else rainCtx.fillStyle = 'rgba(255,205,120,' + (maxA * fade * 0.55) + ')';
+      rainCtx.fillText(ch, col.x, yy);
+    }
+  }
+}
+
+/* ================= 背景：星空 ================= */
+function makeStars() {
+  stars = [];
+  const n = Math.round(W * H / 8500);
+  for (let i = 0; i < n; i++) {
+    stars.push({
+      x: Math.random() * W, y: Math.random() * H,
+      r: 0.35 + Math.random() * 1.25,
+      ph: Math.random() * TAU, sp: 0.5 + Math.random() * 1.8,
+      big: Math.random() < 0.1,
+      c: Math.random() < 0.82 ? [255, 231, 190] : [186, 212, 255]
+    });
+  }
+}
+function drawStars(t) {
+  for (const s of stars) {
+    const tw = 0.5 + 0.5 * Math.sin(t * s.sp + s.ph);
+    const a = (0.2 + 0.5 * tw) * (s.big ? 1 : 0.85);
+    ctx.fillStyle = 'rgba(' + s.c[0] + ',' + s.c[1] + ',' + s.c[2] + ',' + a + ')';
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, TAU); ctx.fill();
+    if (s.big && tw > 0.6) {
+      ctx.globalAlpha = (tw - 0.6) * 0.5;
+      ctx.strokeStyle = 'rgba(255,236,200,.8)';
+      ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(s.x - s.r * 3.2, s.y); ctx.lineTo(s.x + s.r * 3.2, s.y);
+      ctx.moveTo(s.x, s.y - s.r * 3.2); ctx.lineTo(s.x, s.y + s.r * 3.2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
+/* ================= 背景：月亮 ================= */
+const CRATERS = [
+  [-0.34, -0.3, 0.15], [0.3, 0.24, 0.11], [0.05, -0.55, 0.07],
+  [-0.12, 0.42, 0.09], [0.42, -0.12, 0.06], [-0.5, 0.08, 0.07],
+  [0.16, 0.05, 0.05], [-0.02, -0.18, 0.04]
+];
+function drawMoon() {
+  const mx = moon.x, my = moon.y, R = moon.r;
+  const glow = ctx.createRadialGradient(mx, my, R * 0.2, mx, my, R * 3.6);
+  glow.addColorStop(0, 'rgba(255,214,140,0.36)');
+  glow.addColorStop(0.4, 'rgba(255,214,140,0.10)');
+  glow.addColorStop(1, 'rgba(255,214,140,0)');
+  ctx.fillStyle = glow;
+  ctx.beginPath(); ctx.arc(mx, my, R * 3.6, 0, TAU); ctx.fill();
+  const m = ctx.createRadialGradient(mx - R * 0.25, my - R * 0.32, R * 0.1, mx, my, R);
+  m.addColorStop(0, '#fffbe9');
+  m.addColorStop(0.62, '#ffe3a4');
+  m.addColorStop(1, '#f0b254');
+  ctx.fillStyle = m;
+  ctx.beginPath(); ctx.arc(mx, my, R, 0, TAU); ctx.fill();
+  for (const c of CRATERS) {
+    ctx.fillStyle = 'rgba(196,143,72,0.26)';
+    ctx.beginPath(); ctx.arc(mx + c[0] * R, my + c[1] * R, c[2] * R, 0, TAU); ctx.fill();
+  }
+  drawRabbit();
+}
+function drawRabbit() {
+  const s = moon.r * 0.42;
+  const bob = Math.sin(performance.now() * 0.0012) * s * 0.04;
+  ctx.save();
+  ctx.translate(moon.x + s * 0.2, moon.y + s * 0.28 + bob);
+  ctx.fillStyle = 'rgba(186,142,86,0.44)';
+  // 耳
+  ctx.beginPath(); ctx.ellipse(-s * 0.34, -s * 0.52, s * 0.08, s * 0.26, -0.18, 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(s * 0.02, -s * 0.52, s * 0.08, s * 0.26, 0.18, 0, TAU); ctx.fill();
+  // 头
+  ctx.beginPath(); ctx.arc(-s * 0.16, -s * 0.22, s * 0.24, 0, TAU); ctx.fill();
+  // 身
+  ctx.beginPath(); ctx.ellipse(s * 0.02, s * 0.06, s * 0.34, s * 0.42, 0, 0, TAU); ctx.fill();
+  // 尾
+  ctx.beginPath(); ctx.arc(s * 0.34, s * 0.14, s * 0.09, 0, TAU); ctx.fill();
+  ctx.restore();
+}
+
+/* ================= 背景：孔明灯 ================= */
+function newLantern(anywhere) {
+  return {
+    x: W * (0.1 + Math.random() * 0.8),
+    y: anywhere ? H * (0.22 + Math.random() * 0.7) : H + 50,
+    ph: Math.random() * TAU, sp: 0.3 + Math.random() * 0.5,
+    r: 5 + Math.random() * 5, hue: 26 + Math.random() * 18,
+    a: 0.45 + Math.random() * 0.35
+  };
+}
+function makeLanterns() {
+  lanterns = [];
+  for (let i = 0; i < 4; i++) lanterns.push(newLantern(true));
+}
+function drawLanterns(dt, t) {
+  for (const l of lanterns) {
+    l.y -= (13 + l.r * 1.1) * dt;
+    l.ph += dt * l.sp;
+    l.x += Math.sin(l.ph) * 0.4;
+    if (l.y < -70) Object.assign(l, newLantern(false));
+    const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r * 5);
+    g.addColorStop(0, 'hsla(' + l.hue + ',95%,62%,' + (0.42 * l.a) + ')');
+    g.addColorStop(1, 'hsla(40,95%,62%,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(l.x, l.y, l.r * 5, 0, TAU); ctx.fill();
+    ctx.fillStyle = 'hsla(' + l.hue + ',92%,72%,' + l.a + ')';
+    ctx.fillRect(l.x - l.r * 0.6, l.y - l.r * 0.85, l.r * 1.2, l.r * 1.5);
+    ctx.fillStyle = 'rgba(70,45,20,0.7)';
+    ctx.fillRect(l.x - l.r * 0.85, l.y - l.r * 1.0, l.r * 1.7, 1.5);
+  }
+}
+
+/* ================= 背景：桂花花瓣与星尘 ================= */
+function newPetal(anywhere) {
+  return {
+    x: Math.random() * W,
+    y: anywhere ? Math.random() * H : -18 - Math.random() * 40,
+    vy: 11 + Math.random() * 20,
+    vx: -5 + Math.random() * 10,
+    rot: Math.random() * TAU, vr: -1.2 + Math.random() * 2.4,
+    s: 3 + Math.random() * 4.5,
+    a: 0.26 + Math.random() * 0.3,
+    dust: Math.random() < 0.4
+  };
+}
+function makePetals() {
+  petals = [];
+  const n = Math.max(9, Math.round(W / 40));
+  for (let i = 0; i < n; i++) petals.push(newPetal(true));
+}
+function drawPetals(dt) {
+  for (const pt of petals) {
+    pt.y += pt.vy * dt;
+    pt.x += pt.vx * dt + Math.sin(pt.rot * 2) * 0.3;
+    pt.rot += pt.vr * dt;
+    if (pt.y > H + 30) Object.assign(pt, newPetal(false));
+    ctx.save();
+    ctx.translate(pt.x, pt.y);
+    ctx.rotate(pt.rot);
+    if (pt.dust) {
+      ctx.fillStyle = 'rgba(255,226,170,' + pt.a + ')';
+      ctx.beginPath(); ctx.arc(0, 0, pt.s * 0.45, 0, TAU); ctx.fill();
+      ctx.globalAlpha = pt.a * 0.35;
+      ctx.beginPath(); ctx.arc(0, 0, pt.s * 1.1, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.fillStyle = 'hsla(42,82%,74%,' + pt.a + ')';
+      for (let i = 0; i < 4; i++) {
+        ctx.rotate(Math.PI / 2);
+        ctx.beginPath();
+        ctx.ellipse(0, -pt.s * 0.52, pt.s * 0.4, pt.s * 0.48, 0, 0, TAU);
+        ctx.fill();
+      }
+      ctx.fillStyle = 'rgba(255,240,200,0.55)';
+      ctx.beginPath(); ctx.arc(0, 0, pt.s * 0.22, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+/* ================= 诗句意象（每句诗对应的画面剪影） ================= */
+function artSea(c, cx, cy, s, t, a) {
+  c.save(); c.globalAlpha = a;
+  c.strokeStyle = 'rgba(255,217,138,0.75)'; c.lineWidth = Math.max(1, s * 0.012); c.lineCap = 'round';
+  for (let i = 0; i < 3; i++) {
+    const y = cy + (i - 1) * s * 0.22;
+    c.beginPath();
+    for (let x = -s * 1.1; x <= s * 1.1; x += s * 0.05) {
+      const yy = y + Math.sin(x / s * 4 + i * 1.3 + t * 0.8) * s * 0.05;
+      if (x <= -s * 1.1 + 0.01) c.moveTo(cx + x, yy); else c.lineTo(cx + x, yy);
+    }
+    c.stroke();
+  }
+  c.strokeStyle = 'rgba(255,236,190,0.55)';
+  c.beginPath(); c.moveTo(cx, cy - s * 0.4); c.lineTo(cx, cy + s * 0.32); c.stroke();
+  c.fillStyle = 'rgba(255,233,190,0.85)';
+  c.beginPath(); c.arc(cx, cy - s * 0.52, s * 0.09, 0, TAU); c.fill();
+  c.restore();
+}
+function artRabbit(c, cx, cy, s, t, a) {
+  c.save(); c.translate(cx, cy + Math.sin(t * 1.5) * s * 0.02); c.globalAlpha = a;
+  c.fillStyle = 'rgba(240,210,160,0.9)';
+  c.beginPath(); c.ellipse(-s * 0.28, -s * 0.42, s * 0.07, s * 0.24, -0.15, 0, TAU); c.fill();
+  c.beginPath(); c.ellipse(s * 0.02, -s * 0.42, s * 0.07, s * 0.24, 0.15, 0, TAU); c.fill();
+  c.beginPath(); c.arc(-s * 0.13, -s * 0.16, s * 0.22, 0, TAU); c.fill();
+  c.beginPath(); c.ellipse(s * 0.02, s * 0.10, s * 0.30, s * 0.38, 0, 0, TAU); c.fill();
+  c.beginPath(); c.arc(s * 0.30, s * 0.16, s * 0.09, 0, TAU); c.fill();
+  c.fillStyle = 'rgba(255,233,190,0.8)';
+  c.beginPath(); c.arc(-s * 0.55, -s * 0.55, s * 0.12, 0, TAU); c.fill();
+  c.restore();
+}
+function artDew(c, cx, cy, s, t, a) {
+  c.save(); c.globalAlpha = a;
+  c.strokeStyle = 'rgba(255,217,138,0.8)'; c.lineWidth = Math.max(1.5, s * 0.018); c.lineCap = 'round';
+  for (let i = -1; i <= 1; i++) {
+    c.beginPath();
+    c.moveTo(cx + i * s * 0.42, cy + s * 0.42);
+    c.quadraticCurveTo(cx + i * s * 0.5, cy - s * 0.05, cx + i * s * 0.28, cy - s * 0.38);
+    c.stroke();
+  }
+  c.fillStyle = 'rgba(255,240,210,0.9)';
+  const drops = [[-s * 0.30, cy - s * 0.15], [s * 0.1, cy - s * 0.28], [s * 0.42, cy - s * 0.05]];
+  for (const dp of drops) {
+    c.beginPath(); c.arc(dp[0], dp[1], s * 0.055, 0, TAU); c.fill();
+    c.fillStyle = 'rgba(255,255,245,0.55)';
+    c.beginPath(); c.arc(dp[0] - s * 0.015, dp[1] - s * 0.018, s * 0.018, 0, TAU); c.fill();
+    c.fillStyle = 'rgba(255,240,210,0.9)';
+  }
+  c.restore();
+}
+function artGaze(c, cx, cy, s, t, a) {
+  c.save(); c.globalAlpha = a;
+  c.fillStyle = 'rgba(230,200,160,0.85)';
+  c.beginPath(); c.arc(cx, cy - s * 0.28, s * 0.10, 0, TAU); c.fill();
+  c.beginPath();
+  c.moveTo(cx - s * 0.05, cy - s * 0.18);
+  c.quadraticCurveTo(cx - s * 0.28, cy - s * 0.05, cx - s * 0.30, cy + s * 0.42);
+  c.lineTo(cx + s * 0.30, cy + s * 0.42);
+  c.quadraticCurveTo(cx + s * 0.28, cy - s * 0.05, cx + s * 0.05, cy - s * 0.18);
+  c.closePath(); c.fill();
+  c.fillStyle = 'rgba(255,233,190,0.85)';
+  c.beginPath(); c.arc(cx + s * 0.42, cy - s * 0.45, s * 0.07, 0, TAU); c.fill();
+  c.restore();
+}
+function artFullmoon(c, cx, cy, s, t, a) {
+  c.save(); c.globalAlpha = a;
+  const R = s * 0.34;
+  const glow = c.createRadialGradient(cx, cy, R * 0.3, cx, cy, R * 1.8);
+  glow.addColorStop(0, 'rgba(255,214,140,0.4)');
+  glow.addColorStop(1, 'rgba(255,214,140,0)');
+  c.fillStyle = glow; c.beginPath(); c.arc(cx, cy, R * 1.8, 0, TAU); c.fill();
+  const m = c.createRadialGradient(cx - R * 0.3, cy - R * 0.3, R * 0.2, cx, cy, R);
+  m.addColorStop(0, '#fff6e0'); m.addColorStop(0.7, '#ffe3a4'); m.addColorStop(1, '#f0b254');
+  c.fillStyle = m; c.beginPath(); c.arc(cx, cy, R, 0, TAU); c.fill();
+  c.fillStyle = 'rgba(196,143,72,0.3)';
+  const craters = [[-0.3, -0.3, 0.16], [0.3, 0.25, 0.12], [0, -0.55, 0.08], [-0.15, 0.4, 0.1]];
+  for (const cr of craters) { c.beginPath(); c.arc(cx + cr[0] * R, cy + cr[1] * R, cr[2] * R, 0, TAU); c.fill(); }
+  c.restore();
+}
+function artMountain(c, cx, cy, s, t, a) {
+  c.save(); c.globalAlpha = a;
+  c.fillStyle = 'rgba(214,180,130,0.75)';
+  c.beginPath(); c.moveTo(cx - s * 1.05, cy + s * 0.4);
+  c.lineTo(cx - s * 0.45, cy - s * 0.42); c.lineTo(cx - s * 0.05, cy + s * 0.05); c.lineTo(cx + s * 0.1, cy + s * 0.4); c.closePath(); c.fill();
+  c.beginPath(); c.moveTo(cx + s * 0.15, cy + s * 0.4);
+  c.lineTo(cx + s * 0.5, cy - s * 0.28); c.lineTo(cx + s * 0.85, cy + s * 0.4); c.closePath(); c.fill();
+  c.fillStyle = 'rgba(240,225,190,0.5)';
+  for (let i = 0; i < 3; i++) {
+    c.beginPath(); c.ellipse(cx + (i - 1) * s * 0.4, cy + s * 0.1 + Math.sin(t + i) * s * 0.02, s * 0.28, s * 0.08, 0, 0, TAU); c.fill();
+  }
+  c.fillStyle = 'rgba(255,233,190,0.9)';
+  c.beginPath(); c.arc(cx + s * 0.42, cy - s * 0.34, s * 0.1, 0, TAU); c.fill();
+  c.restore();
+}
+function artTide(c, cx, cy, s, t, a) {
+  c.save(); c.globalAlpha = a;
+  c.strokeStyle = 'rgba(255,217,138,0.7)'; c.lineWidth = Math.max(1.5, s * 0.014); c.lineCap = 'round';
+  for (let i = 0; i < 4; i++) {
+    const y = cy + (i - 1.5) * s * 0.24;
+    c.beginPath();
+    for (let x = -s * 1.1; x <= s * 1.1; x += s * 0.04) {
+      const yy = y + Math.sin(x / s * 3 + i * 1.7 + t * 1.2) * s * 0.09;
+      if (x <= -s * 1.1 + 0.01) c.moveTo(cx + x, yy); else c.lineTo(cx + x, yy);
+    }
+    c.stroke();
+  }
+  c.strokeStyle = 'rgba(255,236,190,0.6)';
+  c.beginPath(); c.moveTo(cx, cy - s * 0.6); c.lineTo(cx, cy + s * 0.45); c.stroke();
+  c.fillStyle = 'rgba(255,233,190,0.9)';
+  c.beginPath(); c.arc(cx, cy - s * 0.72, s * 0.1, 0, TAU); c.fill();
+  c.restore();
+}
+function artOsmanthus(c, cx, cy, s, t, a) {
+  c.save(); c.globalAlpha = a;
+  c.strokeStyle = 'rgba(210,175,125,0.85)'; c.lineWidth = Math.max(2, s * 0.02); c.lineCap = 'round';
+  c.beginPath(); c.moveTo(cx - s * 0.5, cy + s * 0.42);
+  c.quadraticCurveTo(cx - s * 0.1, cy + s * 0.2, cx + s * 0.35, cy - s * 0.3); c.stroke();
+  c.beginPath(); c.moveTo(cx + s * 0.02, cy + s * 0.22);
+  c.quadraticCurveTo(cx + s * 0.15, cy - s * 0.05, cx + s * 0.28, cy - s * 0.18); c.stroke();
+  c.fillStyle = 'rgba(255,214,120,0.9)';
+  const clusters = [[-s * 0.28, cy + s * 0.02], [s * 0.1, cy - s * 0.16], [s * 0.3, cy - s * 0.34], [-s * 0.05, cy + s * 0.14]];
+  for (const cl of clusters) {
+    for (let j = 0; j < 5; j++) {
+      c.beginPath(); c.arc(cl[0] + Math.cos(j * 1.256) * s * 0.045, cl[1] + Math.sin(j * 1.256) * s * 0.045, s * 0.03, 0, TAU); c.fill();
+    }
+  }
+  c.fillStyle = 'rgba(60,52,80,0.85)';
+  c.beginPath(); c.ellipse(cx + s * 0.55, cy - s * 0.2, s * 0.09, s * 0.07, -0.2, 0, TAU); c.fill();
+  c.beginPath(); c.arc(cx + s * 0.63, cy - s * 0.22, s * 0.045, 0, TAU); c.fill();
+  c.restore();
+}
+function artRiver(c, cx, cy, s, t, a) {
+  c.save(); c.globalAlpha = a;
+  c.strokeStyle = 'rgba(214,180,130,0.7)'; c.lineWidth = Math.max(1.5, s * 0.014);
+  c.beginPath(); c.moveTo(cx - s * 1.1, cy - s * 0.1); c.lineTo(cx + s * 1.1, cy - s * 0.1); c.stroke();
+  c.strokeStyle = 'rgba(255,217,138,0.7)';
+  for (let i = 0; i < 3; i++) {
+    const y = cy + (i + 1) * s * 0.16;
+    c.beginPath();
+    for (let x = -s * 1.1; x <= s * 1.1; x += s * 0.05) {
+      const yy = y + Math.sin(x / s * 4 + i * 1.2 + t * 0.9) * s * 0.04;
+      if (x <= -s * 1.1 + 0.01) c.moveTo(cx + x, yy); else c.lineTo(cx + x, yy);
+    }
+    c.stroke();
+  }
+  c.fillStyle = 'rgba(255,236,200,0.9)';
+  for (let i = 0; i < 8; i++) {
+    const sx = cx + Math.sin(i * 2.7) * s * 0.85;
+    const sy = cy - s * 0.3 - ((i * 37) % 10) / 10 * s * 0.3;
+    c.beginPath(); c.arc(sx, sy, s * 0.02 + (i % 3) * 0.008, 0, TAU); c.fill();
+  }
+  c.restore();
+}
+function artFishlight(c, cx, cy, s, t, a) {
+  c.save(); c.globalAlpha = a;
+  c.strokeStyle = 'rgba(255,217,138,0.55)'; c.lineWidth = Math.max(1.5, s * 0.014);
+  for (let i = 0; i < 3; i++) {
+    const y = cy + (i - 1) * s * 0.2;
+    c.beginPath(); c.moveTo(cx - s * 1.1, y); c.lineTo(cx + s * 1.1, y); c.stroke();
+  }
+  const fires = [[-s * 0.45, cy - s * 0.22], [s * 0.15, cy - s * 0.3], [s * 0.6, cy - s * 0.12]];
+  for (const f of fires) {
+    const gl = c.createRadialGradient(f[0], f[1], 0, f[0], f[1], s * 0.1);
+    gl.addColorStop(0, 'rgba(255,150,90,' + (0.9 * a) + ')');
+    gl.addColorStop(1, 'rgba(255,150,90,0)');
+    c.fillStyle = gl; c.beginPath(); c.arc(f[0], f[1], s * 0.1, 0, TAU); c.fill();
+    c.strokeStyle = 'rgba(255,170,110,' + (0.4 * a) + ')';
+    c.beginPath(); c.moveTo(f[0], f[1] + s * 0.05); c.lineTo(f[0], f[1] + s * 0.22); c.stroke();
+  }
+  c.restore();
+}
+const ART = {
+  sea: artSea, rabbit: artRabbit, dew: artDew, gaze: artGaze,
+  fullmoon: artFullmoon, mountain: artMountain, tide: artTide,
+  osmanthus: artOsmanthus, river: artRiver, fishlight: artFishlight
+};
+/* 诗句与意象共用的浮现透明度 */
+function poemAlpha() {
+  if (state === 'gather') return Math.max(0, Math.min(1, (stateT - 1500) / 800));
+  if (state === 'hold') {
+    if (stateT < 800) return stateT / 800;
+    if (stateT > HOLD_MS - 900) return Math.max(0, (HOLD_MS - stateT) / 900);
+    return 1;
+  }
+  if (state === 'orbit') return Math.max(0, 1 - stateT / 500);
+  return 0;
+}
+function drawArt(t) {
+  const a = poemAlpha();
+  if (a <= 0.01) return;
+  const fn = ART[SCENES[idx].art];
+  if (!fn) return;
+  const cx = W / 2;
+  const cy = H * (isTouch ? 0.88 : 0.885);
+  const s = Math.min(W, H) * (isTouch ? 0.15 : 0.125);
+  fn(ctx, cx, cy, s, t / 1000, a);
+}
+
+/* ================= 粒子漩涡环（与下方剪影同风格粒子流） ================= */
+function drawDigitalRing(t) {
+  let a = 0;
+  if (state === 'wait') a = Math.min(1, stateT / 500);
+  else if (state === 'gather') a = Math.max(0, 1 - stateT / 1300);
+  else return;
+  ctx.save();
+  ctx.globalAlpha = a;
+  const cx = cake.cx, cy = cake.cy;
+  const rings = [
+    { k: 0.70, sp: 0.40, dir: 1 },
+    { k: 0.92, sp: -0.28, dir: -1 },
+    { k: 1.14, sp: 0.18, dir: 1 }
+  ];
+  for (const rg of rings) {
+    const R = cake.R * rg.k;
+    const count = Math.max(24, Math.floor(R * 2 * Math.PI / 8));
+    for (let i = 0; i < count; i++) {
+      const ang = i / count * TAU + t * rg.sp * rg.dir;
+      const x = cx + Math.cos(ang) * R, y = cy + Math.sin(ang) * R;
+      const twinkle = 0.5 + 0.5 * Math.sin(i * 1.7 + t * 2.4);
+      const size = 1 + twinkle * 1.2;
+      const alpha = 0.3 + twinkle * 0.5;
+      /* 粒子点风格，与下方剪影粒子统一 */
+      ctx.beginPath();
+      ctx.arc(x, y, size, 0, TAU);
+      ctx.fillStyle = 'rgba(255, 217, 138,' + alpha + ')';
+      ctx.fill();
+      /* 亮核 */
+      if (twinkle > 0.7) {
+        ctx.beginPath();
+        ctx.arc(x, y, size * 2.5, 0, TAU);
+        ctx.fillStyle = 'rgba(255, 240, 205,' + (twinkle * 0.15) + ')';
+        ctx.fill();
+      }
+    }
+  }
+  ctx.restore();
+}
+
+/* ================= 诗句浮现（月饼上方） ================= */
+function drawPoem() {
+  const a = poemAlpha();
+  if (a <= 0.01) return;
+  const sc = SCENES[idx];
+  const fs = computeFontSize(sc.text);
+  ctx.save();
+  ctx.globalAlpha = a;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '900 ' + fs + 'px ' + SERIF;
+  ctx.shadowColor = 'rgba(255,196,100,0.9)';
+  ctx.shadowBlur = 26;
+  ctx.fillStyle = 'rgba(255,232,178,0.96)';
+  ctx.fillText(sc.text, W / 2, H * (isTouch ? 0.675 : 0.745));
+  ctx.restore();
+}
+
+/* ================= 粒子：随机方向运动 + 月饼成形 ================= */
+const SPRING = 3.0;
+function updateParticles(dt) {
+  if (state === 'wait') return; /* 进入后先静置 2 秒 */
+  const gather = state === 'gather';
+  const orbit = state === 'orbit' || state === 'end';
+  const pull = gather ? SPRING : (orbit ? 2.0 : 4.4);
+  const noise = gather ? 95 : (orbit ? 10 : 30); /* 随机方向扰动，成形后保持神秘微漂移 */
+  for (const p of parts) {
+    p.ph += dt * (1.2 + p.lk);
+    p.kick = Math.max(0, p.kick - dt * 1.6);
+    const dx = p.tx - p.x, dy = p.ty - p.y;
+    p.vx += dx * pull * dt;
+    p.vy += dy * pull * dt;
+    const n = noise * (p.hot ? 0.45 : 1); /* 花纹粒子扰动更小，保持纹路清晰 */
+    p.vx += (Math.random() - 0.5) * n * dt * 2.4;
+    p.vy += (Math.random() - 0.5) * n * dt * 2.4;
+    const damp = Math.pow(0.04, dt); /* 帧率无关阻尼：每秒速度衰减到 4% */
+    p.vx *= damp; p.vy *= damp;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+  }
+}
+function drawParticles() {
+  ctx.lineCap = 'round';
+  const trail = state === 'gather'; /* 汇聚阶段带随机拖尾 */
+  for (const p of parts) {
+    const l = 60 + Math.sin(p.ph * 2) * 8 + p.kick * 18;
+    const col = p.c + l + ')';
+    ctx.fillStyle = col;
+    if (trail) {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = Math.max(0.6, p.r * 0.8);
+      ctx.beginPath();
+      ctx.moveTo(p.x - p.vx * 0.05, p.y - p.vy * 0.05);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, TAU); ctx.fill();
+    if (p.hot || p.r > 1.15) {
+      ctx.globalAlpha = p.hot ? 0.22 : 0.14;
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.r * 3, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+}
+
+/* ================= 状态机 ================= */
+function enterOrbit() {
+  state = 'orbit'; stateT = 0; orbitArrived = false;
+  const base = moon.r * 1.28, spread = moon.r * 0.30;
+  for (const p of parts) {
+    const a = Math.random() * TAU, rr = base + Math.random() * spread;
+    p.tx = moon.x + Math.cos(a) * rr;
+    p.ty = moon.y + Math.sin(a) * rr;
+  }
+}
+function updateState(dt) {
+  stateT += dt * 1000;
+  if (state === 'wait') {
+    if (stateT > WAIT_MS) { state = 'gather'; stateT = 0; }
+  } else if (state === 'gather') {
+    if (stateT > GATHER_MS) { state = 'hold'; stateT = 0; } /* 固定汇聚时长，不依赖距离判定 */
+  } else if (state === 'hold') {
+    if (stateT > HOLD_MS) {
+      if (idx >= SCENES.length - 1) {
+        enterOrbit(); /* 十二句播毕，月饼散成绕月光环 */
+      } else {
+        idx++; stateT = 0; /* 月饼保持，换句，粒子随机呼吸一次 */
+        kickCake(78);
+      }
+    }
+  } else if (state === 'orbit') {
+    if (!orbitArrived) {
+      if (stateT > ORBIT_MS) { orbitArrived = true; stateT = 0; }
+    } else if (stateT > ORBIT_HOLD_MS) {
+      state = 'end';
+      /* 十二句诗全部播完，触发赛博礼花彩蛋 */
+      if (window.cyberFirework) window.cyberFirework.start();
+    }
+  }
+}
+
+/* ================= 画布与主循环 ================= */
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  canvas.width = Math.round(W * DPR);
+  canvas.height = Math.round(H * DPR);
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  rainCanvas.width = Math.round(W * DPR);
+  rainCanvas.height = Math.round(H * DPR);
+  rainCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  resetRain();
+  moon.x = W * 0.82; moon.y = H * 0.16;
+  moon.r = Math.max(40, Math.min(W, H) * 0.115);
+  makeStars(); makeLanterns(); makePetals();
+  applyMooncake();
+}
+
+let rsT = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(rsT);
+  rsT = setTimeout(resize, 200);
+});
+
+function frame(t) {
+  const dt = Math.min(0.05, last ? (t - last) / 1000 : 0.016);
+  last = t;
+  updateParticles(dt);
+  updateState(dt);
+
+  drawRain();
+  ctx.clearRect(0, 0, W, H);
+  drawStars(t / 1000);
+  drawMoon();
+  drawLanterns(dt, t / 1000);
+  drawDigitalRing(t / 1000);
+  drawPetals(dt);
+  drawArt(t);
+  drawParticles();
+  drawPoem();
+
+  requestAnimationFrame(frame);
+}
+
+function drawStatic() {
+  const sc = SCENES[idx];
+  resetRain();
+  drawRain();
+  ctx.clearRect(0, 0, W, H);
+  drawStars(0);
+  drawMoon();
+  /* 静态月饼：直接用采样点 */
+  for (const tg of targets) {
+    ctx.fillStyle = tg.hot ? 'rgba(255,246,222,0.96)' : 'rgba(240,182,92,0.92)';
+    ctx.fillRect(tg.x - 1, tg.y - 1, 2.2, 2.2);
+  }
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '900 ' + computeFontSize(sc.text) + 'px ' + SERIF;
+  ctx.fillStyle = 'rgba(255,232,178,0.95)';
+  ctx.fillText(sc.text, W / 2, H * (isTouch ? 0.675 : 0.745));
+}
+
+/* ================= 背景音乐与节奏编排 ================= */
+const bgm = document.getElementById('bgm');
+function applyTempo() {
+  const sec = bgm.duration;
+  if (!sec || isNaN(sec) || sec <= 0) return;
+  /* 十二句诗铺满整首音乐：每句 = 音乐时长 / 12，下限 5 秒，上限 18 秒 */
+  const per = Math.max(5, Math.min(18, Math.floor(sec / SCENES.length)));
+  HOLD_MS = per * 1000;
+}
+bgm.addEventListener('loadedmetadata', applyTempo);
+if (bgm.readyState >= 1) applyTempo();
+function startMusic() {
+  const p = bgm.play();
+  if (p && p.catch) p.catch(() => {});
+}
+/* 浏览器拦截自动播放时：首次点击/触摸屏幕即出声（页面不设任何可见按钮） */
+function unlockOnce() {
+  startMusic();
+  window.removeEventListener('pointerdown', unlockOnce);
+  window.removeEventListener('touchstart', unlockOnce);
+}
+window.addEventListener('pointerdown', unlockOnce);
+window.addEventListener('touchstart', unlockOnce);
+
+/* ================= 启动 ================= */
+function init() {
+  resize();
+  startMusic();
+  if (reduceMotion) {
+    drawStatic();
+    return;
+  }
+  requestAnimationFrame(frame);
+}
+
+if (reduceMotion) {
+  init();
+} else {
+  Promise.race([
+    Promise.all([
+      document.fonts.load('900 120px "Noto Serif SC"'),
+      document.fonts.load('400 16px "Noto Sans SC"')
+    ]),
+    new Promise(r => setTimeout(r, 2200))
+  ]).then(init).catch(init);
+}
+
+/* ============================================================
+   赛博朋克礼花彩蛋 —— 十二句诗播完后自动触发
+   ============================================================ */
+const CyberFirework = (function() {
+  const TAU = Math.PI * 2;
+  const PALETTE = [
+    { h: 186, s: 100, l: 62 },
+    { h: 312, s: 100, l: 66 },
+    { h: 268, s: 100, l: 72 },
+    { h: 48,  s: 100, l: 64 },
+    { h: 158, s: 100, l: 58 },
+    { h: 20,  s: 100, l: 62 },
+  ];
+
+  const canvas = document.getElementById('firework');
+  const ctx = canvas.getContext('2d');
+  let W = 0, H = 0, DPR = 1;
+  let rockets = [], particles = [];
+  let running = false, rafId = 0, lastTs = 0;
+  let nextLaunchIn = 0;
+  let launched = false;
+
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    canvas.width = Math.round(W * DPR);
+    canvas.height = Math.round(H * DPR);
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
+  function launch(targetX, targetY) {
+    const color = PALETTE[Math.floor(Math.random() * PALETTE.length)];
+    rockets.push({
+      x: targetX || (W * 0.2 + Math.random() * W * 0.6),
+      y: H + 20,
+      targetY: targetY || (H * 0.15 + Math.random() * H * 0.35),
+      vx: (Math.random() - 0.5) * 60,
+      vy: -(H * 0.9 + Math.random() * H * 0.2),
+      color: color,
+      trail: [],
+    });
+  }
+
+  function explode(r) {
+    const count = 60 + Math.floor(Math.random() * 40);
+    const baseSpeed = 150 + Math.random() * 100;
+    for (let i = 0; i < count; i++) {
+      const angle = (i / count) * TAU;
+      const speed = baseSpeed * (0.3 + Math.random() * 0.7);
+      particles.push({
+        x: r.x, y: r.targetY,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1,
+        decay: 0.8 + Math.random() * 0.5,
+        size: 1.5 + Math.random() * 2,
+        color: r.color,
+      });
+    }
+  }
+
+  function loop(ts) {
+    if (!running) return;
+    const dt = Math.min((ts - lastTs) / 1000, 0.05);
+    lastTs = ts;
+
+    // 自动发射
+    nextLaunchIn -= dt;
+    if (nextLaunchIn <= 0) {
+      launch();
+      if (Math.random() < 0.4) launch();
+      nextLaunchIn = 0.5 + Math.random() * 1.0;
+    }
+
+    // 半透明拖尾
+    ctx.fillStyle = 'rgba(7, 11, 32, 0.12)';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';
+
+    // 更新火箭
+    for (let i = rockets.length - 1; i >= 0; i--) {
+      const r = rockets[i];
+      r.x += r.vx * dt;
+      r.y += r.vy * dt;
+      r.vy += 780 * 0.3 * dt;
+
+      r.trail.push({ x: r.x, y: r.y });
+      if (r.trail.length > 8) r.trail.shift();
+
+      for (let j = 0; j < r.trail.length; j++) {
+        const t = r.trail[j];
+        const a = j / r.trail.length;
+        ctx.beginPath();
+        ctx.arc(t.x, t.y, 2 * a, 0, TAU);
+        ctx.fillStyle = `hsla(${r.color.h}, ${r.color.s}%, ${r.color.l}%, ${a * 0.8})`;
+        ctx.fill();
+      }
+
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, 3, 0, TAU);
+      ctx.fillStyle = `hsla(${r.color.h}, 100%, 80%, 1)`;
+      ctx.fill();
+
+      if (r.y <= r.targetY || r.vy >= 0) {
+        explode(r);
+        rockets.splice(i, 1);
+      }
+    }
+
+    // 更新粒子
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vy += 780 * dt;
+      p.vx *= 0.985;
+      p.vy *= 0.985;
+      p.life -= p.decay * dt;
+
+      if (p.life <= 0) {
+        particles.splice(i, 1);
+        continue;
+      }
+
+      const alpha = Math.max(p.life, 0);
+      const flicker = 0.7 + Math.random() * 0.3;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * p.life, 0, TAU);
+      ctx.fillStyle = `hsla(${p.color.h}, ${p.color.s}%, ${p.color.l}%, ${alpha * flicker})`;
+      ctx.fill();
+    }
+
+    ctx.globalCompositeOperation = 'source-over';
+    rafId = requestAnimationFrame(loop);
+  }
+
+  function start() {
+    if (launched) return;
+    launched = true;
+    canvas.classList.add('active');
+    resize();
+    window.addEventListener('resize', resize);
+    window.addEventListener('click', (e) => {
+      if (e.target.closest('.btn')) return;
+      launch(e.clientX, e.clientY);
+    });
+    running = true;
+    lastTs = performance.now();
+    nextLaunchIn = 0.3;
+    // 开场先来一波齐射
+    for (let i = 0; i < 5; i++) {
+      setTimeout(() => launch(), i * 200);
+    }
+    rafId = requestAnimationFrame(loop);
+  }
+
+  return { start };
+})();
+
+window.cyberFirework = CyberFirework;
+</script>
+</body>
+</html>
