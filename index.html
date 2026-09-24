@@ -6,699 +6,754 @@
 <meta name="theme-color" content="#050a1e">
 <title>中秋 · 银河粒子</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  html, body {
-    width: 100%; height: 100%; overflow: hidden;
-    background: #050a1e;
-    font-family: "Songti SC", "SimSun", "Noto Serif SC", "STSong", serif;
-    -webkit-tap-highlight-color: transparent;
-    -webkit-user-select: none; user-select: none;
-    touch-action: none;
-  }
-  canvas { position: fixed; inset: 0; display: block; width: 100%; height: 100%; }
-  #rain  { z-index: 1; }
-  #scene { z-index: 2; }
-  #hint {
-    position: fixed;
-    left: 50%;
-    bottom: max(28px, env(safe-area-inset-bottom));
-    transform: translateX(-50%);
-    z-index: 10;
-    padding: 0.7em 1.6em;
-    font-size: clamp(12px, 3.2vw, 16px);
-    letter-spacing: 0.22em; text-indent: 0.22em;
-    color: rgba(255, 225, 150, 0.95);
-    background: rgba(10, 20, 40, 0.72);
-    border: 1px solid rgba(255, 200, 100, 0.5);
-    border-radius: 999px;
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    opacity: 0; visibility: hidden;
-    transition: opacity 0.9s ease, visibility 0s linear 0.9s;
-    white-space: nowrap; pointer-events: none;
-  }
-  #hint.show {
-    opacity: 1; visibility: visible;
-    transition: opacity 0.9s ease, visibility 0s linear 0s;
-    animation: hintBreathe 2.6s ease-in-out infinite;
-  }
-  @keyframes hintBreathe {
-    0%, 100% { box-shadow: 0 0 22px rgba(255, 200, 100, 0.30); }
-    50%      { box-shadow: 0 0 42px rgba(255, 200, 100, 0.60); }
-  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #050a1e;
+    font-family: "Songti SC", "SimSun", "Noto Serif SC", "STSong", serif;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none; user-select: none;
+    touch-action: none;
+  }
+  canvas { position: fixed; inset: 0; display: block; width: 100%; height: 100%; }
+  #rain  { z-index: 1; }
+  #scene { z-index: 2; }
+  #hint {
+    position: fixed;
+    left: 50%;
+    bottom: max(28px, env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    z-index: 10;
+    padding: 0.7em 1.6em;
+    font-size: clamp(12px, 3.2vw, 16px);
+    letter-spacing: 0.22em; text-indent: 0.22em;
+    color: rgba(255, 225, 150, 0.95);
+    background: rgba(10, 20, 40, 0.72);
+    border: 1px solid rgba(255, 200, 100, 0.5);
+    border-radius: 999px;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    opacity: 0; visibility: hidden;
+    transition: opacity 0.9s ease, visibility 0s linear 0.9s;
+    white-space: nowrap; pointer-events: none;
+  }
+  #hint.show {
+    opacity: 1; visibility: visible;
+    transition: opacity 0.9s ease, visibility 0s linear 0s;
+    animation: hintBreathe 2.6s ease-in-out infinite;
+  }
+  @keyframes hintBreathe {
+    0%, 100% { box-shadow: 0 0 22px rgba(255, 200, 100, 0.30); }
+    50%      { box-shadow: 0 0 42px rgba(255, 200, 100, 0.60); }
+  }
 </style>
 </head>
 <body>
 <canvas id="rain"></canvas>
 <canvas id="scene"></canvas>
 <div id="hint">刷新页面 · 重新播放</div>
-<audio id="bgm" src="assets/bgm.mp3" loop preload="metadata">
+<audio id="bgm" src="assets/bgm.mp3" loop preload="metadata"></audio>
 <script>
 (function () {
-  'use strict';
-  const TAU = Math.PI * 2;
-  const POEMS = [
-    '海上生明月，天涯共此时',
-    '但愿人长久，千里共婵娟',
-    '露从今夜白，月是故乡明',
-    '今夜月明人尽望，不知秋思落谁家',
-    '秋空明月悬，光彩露沾湿',
-    '圆魄上寒空，皆言四海同',
-    '明月出天山，苍茫云海间',
-    '春江潮水连海平，海上明月共潮生',
-    '举头望明月，低头思故乡',
-    '中庭地白树栖鸦，冷露无声湿桂花',
-    '星垂平野阔，月涌大江流',
-    '月落乌啼霜满天，江枫渔火对愁眠'
-  ];
-  const T_GALAXY   = 6;
-  const T_POEM_EACH = 3.5;
-  const T_POEM_ALL = T_POEM_EACH * POEMS.length;
-  const T_FIREWORK = 10;
-  const T_TOTAL    = T_GALAXY + T_POEM_ALL + T_FIREWORK;
-  const NEON = [
-    { h: 180, s: 100, l: 60 },
-    { h: 300, s: 100, l: 62 },
-    { h: 270, s: 100, l: 66 },
-    { h: 48,  s: 100, l: 60 },
-    { h: 140, s: 100, l: 56 },
-    { h: 25,  s: 100, l: 58 }
-  ];
-
-  const UA = navigator.userAgent;
-  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(UA);
-  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const TIERS = {
-    high: { particles: 6000, fps: 60, glow: true,  craters: true,  rainMul: 1.0, lanterns: 4, petals: 26, stars: 220, dprMax: 2.0 },
-    mid:  { particles: 3500, fps: 45, glow: true,  craters: false, rainMul: 0.7, lanterns: 3, petals: 16, stars: 130, dprMax: 1.5 },
-    low:  { particles: 1500, fps: 30, glow: false, craters: false, rainMul: 0.5, lanterns: 2, petals: 10, stars: 70,  dprMax: 1.2 }
-  };
-  function detectTier() {
-    const cores = navigator.hardwareConcurrency || 4;
-    const mem   = navigator.deviceMemory || 4;
-    let score = 0;
-    if (cores >= 8) score += 3; else if (cores >= 6) score += 2; else if (cores >= 4) score += 1;
-    if (mem >= 8) score += 2;   else if (mem >= 6) score += 1;
-    if (!isMobile) score += 2;
-    if (score >= 5) return 'high';
-    if (score >= 3) return 'mid';
-    return 'low';
-  }
-  const TIER = detectTier();
-  const CFG  = TIERS[TIER];
-
-  const rainCanvas = document.getElementById('rain');
-  const rainCtx = rainCanvas.getContext('2d');
-  const scene = document.getElementById('scene');
-  const ctx = scene.getContext('2d', { alpha: true, desynchronized: true });
-  let W = 0, H = 0, DPR = 1;
-
-  const MAX_P = CFG.particles;
-  const P = {
-    x: new Float32Array(MAX_P),
-    y: new Float32Array(MAX_P),
-    vx: new Float32Array(MAX_P),
-    vy: new Float32Array(MAX_P),
-    tx: new Float32Array(MAX_P),
-    ty: new Float32Array(MAX_P),
-    size: new Float32Array(MAX_P),
-    hue: new Float32Array(MAX_P),
-    alpha: new Float32Array(MAX_P),
-    mode: new Uint8Array(MAX_P),
-    count: MAX_P
-  };
-
-  let stars = [];
-  let lanterns = [];
-  let petals = [];
-  let rainCols = [];
-  const moon = { x: 0, y: 0, r: 0 };
-
-  let elapsed = 0;
-  let phase = 'galaxy';
-  let poemIndex = -1;
-  let lastFrameTime = 0;
-  let frameInterval = 1000 / CFG.fps;
-
-  function resize() {
-    DPR = Math.min(window.devicePixelRatio || 1, CFG.dprMax);
-    W = window.innerWidth;
-    H = window.innerHeight;
-    scene.width  = Math.round(W * DPR);
-    scene.height = Math.round(H * DPR);
-    scene.style.width  = W + 'px';
-    scene.style.height = H + 'px';
-    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    rainCanvas.width  = Math.round(W * DPR);
-    rainCanvas.height = Math.round(H * DPR);
-    rainCanvas.style.width  = W + 'px';
-    rainCanvas.style.height = H + 'px';
-    rainCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    moon.r = Math.max(26, Math.min(W, H) * 0.09);
-    moon.x = W - moon.r - Math.max(18, W * 0.055);
-    moon.y = moon.r + Math.max(24, H * 0.045);
-    initStars();
-    initLanterns();
-    initPetals();
-    initRain();
-    if (phase === 'poem' && poemIndex >= 0) samplePoem();
-    rainCtx.fillStyle = '#050a1e';
-    rainCtx.fillRect(0, 0, W, H);
-  }
-  let resizeTimer = 0;
-  window.addEventListener('resize', function () {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(resize, 180);
-  });
-  window.addEventListener('orientationchange', function () {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(resize, 260);
-  });
-
-  function initStars() {
-    stars = [];
-    for (let i = 0; i < CFG.stars; i++) {
-      stars.push({
-        x: Math.random() * W,
-        y: Math.random() * H,
-        r: 0.4 + Math.random() * 1.2,
-        ph: Math.random() * TAU,
-        sp: 0.6 + Math.random() * 1.6,
-        big: Math.random() < 0.08
-      });
-    }
-  }
-
-  function initLanterns() {
-    lanterns = [];
-    for (let i = 0; i < CFG.lanterns; i++) {
-      lanterns.push(makeLantern(true));
-    }
-  }
-  function makeLantern(anywhere) {
-    return {
-      x: W * (0.1 + Math.random() * 0.8),
-      y: anywhere ? H * (0.25 + Math.random() * 0.65) : H + 50,
-      ph: Math.random() * TAU,
-      sp: 0.3 + Math.random() * 0.5,
-      r: Math.max(4, Math.min(W, H) * 0.012 * (0.8 + Math.random() * 0.6)),
-      hue: 26 + Math.random() * 18,
-      a: 0.45 + Math.random() * 0.35
-    };
-  }
-
-  function initPetals() {
-    petals = [];
-    for (let i = 0; i < CFG.petals; i++) petals.push(makePetal(true));
-  }
-  function makePetal(anywhere) {
-    return {
-      x: Math.random() * W,
-      y: anywhere ? Math.random() * H : -20 - Math.random() * 40,
-      vy: 14 + Math.random() * 22,
-      vx: -6 + Math.random() * 12,
-      rot: Math.random() * TAU,
-      vr: -1.2 + Math.random() * 2.4,
-      s: 3 + Math.random() * 4,
-      a: 0.22 + Math.random() * 0.3,
-      dust: Math.random() < 0.45
-    };
-  }
-
-  function initRain() {
-    rainCols = [];
-    const fs = Math.max(10, Math.round(W / 90));
-    const gap = Math.max(fs * 0.9, fs * 1.4 / CFG.rainMul);
-    for (let x = gap * 0.5; x < W; x += gap) {
-      rainCols.push({
-        x: x,
-        y: Math.random() * H,
-        sp: 0.6 + Math.random() * 1.6,
-        len: 5 + Math.floor(Math.random() * 8),
-        fs: fs
-      });
-    }
-  }
-
-  function enterGalaxy() {
-    phase = 'galaxy';
-    const cx = W * 0.5, cy = H * 0.5;
-    const maxR = Math.min(W, H) * 0.48;
-    for (let i = 0; i < P.count; i++) {
-      const ang = Math.random() * TAU;
-      const r = Math.sqrt(Math.random()) * maxR;
-      P.x[i] = cx + Math.cos(ang) * r;
-      P.y[i] = cy + Math.sin(ang) * r;
-      P.vx[i] = 0; P.vy[i] = 0;
-      P.size[i] = 0.7 + Math.random() * 1.6;
-      P.hue[i]  = 35 + Math.random() * 25;
-      P.alpha[i] = 0.35 + Math.random() * 0.6;
-      P.mode[i] = 0;
-    }
-  }
-
-  let sampleCanvas = null;
-  let sampleCtx = null;
-  function samplePoem() {
-    const text = POEMS[poemIndex];
-    if (!text) return;
-    const scale = 0.5;
-    const sw = Math.max(1, Math.floor(W * scale));
-    const sh = Math.max(1, Math.floor(H * scale));
-    if (!sampleCanvas || sampleCanvas.width !== sw || sampleCanvas.height !== sh) {
-      sampleCanvas = document.createElement('canvas');
-      sampleCanvas.width = sw;
-      sampleCanvas.height = sh;
-      sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
-    }
-    sampleCtx.clearRect(0, 0, sw, sh);
-    const idealPx = (W * 0.9) / text.length;
-    const minPx   = W / 18;
-    const fontPx  = Math.max(idealPx, minPx);
-    const fs = fontPx * scale;
-    sampleCtx.font = '900 ' + fs + 'px "Songti SC","SimSun","Noto Serif SC",serif';
-    sampleCtx.textAlign = 'center';
-    sampleCtx.textBaseline = 'middle';
-    sampleCtx.fillStyle = '#fff';
-    sampleCtx.fillText(text, sw * 0.5, sh * 0.5);
-    const img = sampleCtx.getImageData(0, 0, sw, sh).data;
-    const step = CFG.particles > 4000 ? 3 : (CFG.particles > 2500 ? 4 : 5);
-    const pts = [];
-    for (let y = 0; y < sh; y += step) {
-      for (let x = 0; x < sw; x += step) {
-        if (img[(y * sw + x) * 4 + 3] > 128) {
-          pts.push(x / scale, y / scale);
-        }
-      }
-    }
-    const n = pts.length / 2;
-    if (n === 0) return;
-    for (let i = 0; i < P.count; i++) {
-      const pi = (Math.random() * n) | 0;
-      P.tx[i] = pts[pi * 2]     + (Math.random() - 0.5) * 3;
-      P.ty[i] = pts[pi * 2 + 1] + (Math.random() - 0.5) * 3;
-      P.mode[i] = 1;
-      P.hue[i]  = 38 + Math.random() * 18;
-      P.size[i] = 0.9 + Math.random() * 1.4;
-    }
-  }
-
-  const FW = { rockets: [], sparks: [] };
-  function launchFirework(tx, ty) {
-    const color = NEON[(Math.random() * NEON.length) | 0];
-    const startX = (tx != null) ? tx : W * (0.15 + Math.random() * 0.7);
-    const startY = H + 20;
-    const targetY = (ty != null)
-      ? Math.max(H * 0.08, Math.min(ty, H * 0.62))
-      : H * (0.12 + Math.random() * 0.3);
-    const gravity = 240;
-    const dy = Math.max(80, startY - targetY);
-    const vy = -Math.sqrt(2 * gravity * dy);
-    FW.rockets.push({
-      x: startX, y: startY,
-      vx: (Math.random() - 0.5) * 40,
-      vy: vy,
-      targetY: targetY,
-      gravity: gravity,
-      color: color
-    });
-  }
-  function explodeFirework(r) {
-    const count = 48 + ((Math.random() * 30) | 0);
-    const speed = 150 + Math.random() * 110;
-    for (let i = 0; i < count; i++) {
-      const ang = (i / count) * TAU + (Math.random() - 0.5) * 0.12;
-      const sp  = speed * (0.6 + Math.random() * 0.4);
-      FW.sparks.push({
-        x: r.x, y: r.y,
-        vx: Math.cos(ang) * sp,
-        vy: Math.sin(ang) * sp,
-        life: 1.1 + Math.random() * 0.9,
-        maxLife: 2.0,
-        size: 1.4 + Math.random() * 1.4,
-        color: r.color
-      });
-    }
-  }
-  function updateFireworks(dt) {
-    for (let i = FW.rockets.length - 1; i >= 0; i--) {
-      const r = FW.rockets[i];
-      r.vy += r.gravity * dt;
-      r.x += r.vx * dt;
-      r.y += r.vy * dt;
-      if (r.vy >= 0 || r.y <= r.targetY) {
-        explodeFirework(r);
-        FW.rockets.splice(i, 1);
-      }
-    }
-    for (let i = FW.sparks.length - 1; i >= 0; i--) {
-      const s = FW.sparks[i];
-      s.vy += 130 * dt;
-      s.vx *= 0.985;
-      s.vy *= 0.985;
-      s.x += s.vx * dt;
-      s.y += s.vy * dt;
-      s.life -= dt;
-      if (s.life <= 0) FW.sparks.splice(i, 1);
-    }
-  }
-
-  let fwSpawnTimer = 0;
-  function updateState(dt) {
-    if (elapsed < T_GALAXY) {
-      if (phase !== 'galaxy') enterGalaxy();
-    } else if (elapsed < T_GALAXY + T_POEM_ALL) {
-      const idx = Math.floor((elapsed - T_GALAXY) / T_POEM_EACH);
-      if (phase !== 'poem' || idx !== poemIndex) {
-        phase = 'poem';
-        poemIndex = Math.min(idx, POEMS.length - 1);
-        samplePoem();
-      }
-    } else if (elapsed < T_TOTAL) {
-      if (phase !== 'firework') {
-        phase = 'firework';
-        fwSpawnTimer = 0;
-        for (let i = 0; i < 4; i++) {
-          setTimeout(function () { launchFirework(); }, i * 180);
-        }
-      }
-    } else {
-      if (phase !== 'ended') {
-        phase = 'ended';
-        document.getElementById('hint').classList.add('show');
-      }
-    }
-    if (phase === 'galaxy') {
-      updateGalaxy(dt);
-    } else if (phase === 'poem') {
-      updatePoem(dt);
-    } else if (phase === 'firework' || phase === 'ended') {
-      updatePoem(dt);
-    }
-    if (phase === 'firework') {
-      fwSpawnTimer -= dt;
-      if (fwSpawnTimer <= 0) {
-        launchFirework();
-        if (Math.random() < 0.4) launchFirework();
-        fwSpawnTimer = 0.45 + Math.random() * 0.6;
-      }
-    }
-    updateFireworks(dt);
-  }
-
-  function updateGalaxy(dt) {
-    const cx = W * 0.5, cy = H * 0.5;
-    const base = 0.9;
-    for (let i = 0; i < P.count; i++) {
-      const dx = P.x[i] - cx;
-      const dy = P.y[i] - cy;
-      const r  = Math.sqrt(dx * dx + dy * dy) || 1;
-      const ang = Math.atan2(dy, dx) + base * (150 / (r + 100)) * dt;
-      const newR = r * (1 - 0.025 * dt);
-      P.x[i] = cx + Math.cos(ang) * newR;
-      P.y[i] = cy + Math.sin(ang) * newR;
-      P.alpha[i] = 0.35 + 0.5 * Math.abs(Math.sin(elapsed * 1.6 + i * 0.137));
-    }
-  }
-
-  function updatePoem(dt) {
-    const K = 6.0;
-    const DAMP = 0.86;
-    const JIT = 0.32;
-    for (let i = 0; i < P.count; i++) {
-      if (P.mode[i] !== 1) continue;
-      const dx = P.tx[i] - P.x[i];
-      const dy = P.ty[i] - P.y[i];
-      P.vx[i] = (P.vx[i] + dx * K * dt) * DAMP;
-      P.vy[i] = (P.vy[i] + dy * K * dt) * DAMP;
-      P.vx[i] += (Math.random() - 0.5) * JIT;
-      P.vy[i] += (Math.random() - 0.5) * JIT;
-      P.x[i] += P.vx[i];
-      P.y[i] += P.vy[i];
-    }
-  }
-
-  function render() {
-    drawRain();
-    ctx.clearRect(0, 0, W, H);
-    drawStars(elapsed);
-    drawMoon();
-    drawLanterns();
-    drawPetals();
-    drawParticles();
-    drawFireworks();
-  }
-
-  function drawRain() {
-    rainCtx.fillStyle = 'rgba(5, 10, 30, 0.12)';
-    rainCtx.fillRect(0, 0, W, H);
-    rainCtx.textAlign = 'center';
-    for (let c = 0; c < rainCols.length; c++) {
-      const col = rainCols[c];
-      col.y += col.sp * 60 * (1 / CFG.fps);
-      if (col.y - col.len * col.fs > H) {
-        col.y = -Math.random() * 120;
-        col.sp = 0.6 + Math.random() * 1.6;
-        col.len = 5 + Math.floor(Math.random() * 8);
-      }
-      rainCtx.font = col.fs + 'px monospace';
-      for (let i = 0; i < col.len; i++) {
-        const yy = col.y - i * col.fs;
-        if (yy < -col.fs || yy > H + col.fs) continue;
-        const fade = 1 - i / col.len;
-        if (i === 0) rainCtx.fillStyle = 'rgba(180, 240, 255,' + (fade * 0.75) + ')';
-        else         rainCtx.fillStyle = 'rgba(70, 180, 220,'  + (fade * 0.45) + ')';
-        rainCtx.fillText(Math.random() < 0.5 ? '0' : '1', col.x, yy);
-      }
-    }
-  }
-
-  function drawStars(t) {
-    for (let i = 0; i < stars.length; i++) {
-      const s = stars[i];
-      const tw = 0.5 + 0.5 * Math.sin(t * s.sp + s.ph);
-      const a  = 0.2 + 0.55 * tw;
-      ctx.fillStyle = 'rgba(255, 245, 220,' + a + ')';
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, s.r, 0, TAU);
-      ctx.fill();
-      if (s.big && tw > 0.65 && CFG.glow) {
-        ctx.globalAlpha = (tw - 0.65) * 0.6;
-        ctx.strokeStyle = 'rgba(255, 240, 200, 0.9)';
-        ctx.lineWidth = 0.7;
-        ctx.beginPath();
-        ctx.moveTo(s.x - s.r * 3.5, s.y); ctx.lineTo(s.x + s.r * 3.5, s.y);
-        ctx.moveTo(s.x, s.y - s.r * 3.5); ctx.lineTo(s.x, s.y + s.r * 3.5);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
-    }
-  }
-
-  function drawMoon() {
-    const x = moon.x, y = moon.y, r = moon.r;
-    if (CFG.glow) {
-      const g = ctx.createRadialGradient(x, y, r * 0.4, x, y, r * 3.2);
-      g.addColorStop(0, 'rgba(255, 225, 160, 0.32)');
-      g.addColorStop(1, 'rgba(255, 225, 160, 0)');
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(x, y, r * 3.2, 0, TAU); ctx.fill();
-    }
-    const mg = ctx.createRadialGradient(x - r * 0.3, y - r * 0.32, r * 0.1, x, y, r);
-    mg.addColorStop(0,    '#fffbe9');
-    mg.addColorStop(0.62, '#ffe3a4');
-    mg.addColorStop(1,    '#e8b25a');
-    ctx.fillStyle = mg;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
-    if (CFG.craters) {
-      ctx.fillStyle = 'rgba(180, 130, 70, 0.22)';
-      const cr = [[-0.32, -0.28, 0.16], [0.28, 0.24, 0.11],
-                  [-0.08, 0.34, 0.10], [0.34, -0.14, 0.07]];
-      for (let i = 0; i < cr.length; i++) {
-        ctx.beginPath();
-        ctx.arc(x + cr[i][0] * r, y + cr[i][1] * r, cr[i][2] * r, 0, TAU);
-        ctx.fill();
-      }
-    }
-  }
-
-  function drawLanterns() {
-    for (let i = 0; i < lanterns.length; i++) {
-      const l = lanterns[i];
-      l.y -= 14 * (1 / CFG.fps) * 60 * 0.016;
-      l.ph += 0.016 * l.sp;
-      l.x += Math.sin(l.ph) * 0.4;
-      if (l.y < -60) lanterns[i] = makeLantern(false);
-      if (CFG.glow) {
-        const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r * 4.5);
-        g.addColorStop(0, 'hsla(' + l.hue + ',95%,60%,' + (0.35 * l.a) + ')');
-        g.addColorStop(1, 'hsla(40,95%,60%,0)');
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.arc(l.x, l.y, l.r * 4.5, 0, TAU); ctx.fill();
-      }
-      ctx.fillStyle = 'hsla(' + l.hue + ',92%,70%,' + l.a + ')';
-      ctx.fillRect(l.x - l.r * 0.6, l.y - l.r * 0.9, l.r * 1.2, l.r * 1.6);
-      ctx.fillStyle = 'rgba(80,50,20,0.7)';
-      ctx.fillRect(l.x - l.r * 0.85, l.y - l.r * 1.0, l.r * 1.7, Math.max(1, l.r * 0.15));
-    }
-  }
-
-  function drawPetals() {
-    for (let i = 0; i < petals.length; i++) {
-      const p = petals[i];
-      p.y += p.vy * (1 / CFG.fps);
-      p.x += p.vx * (1 / CFG.fps) + Math.sin(p.rot * 2) * 0.3;
-      p.rot += p.vr * (1 / CFG.fps);
-      if (p.y > H + 30) petals[i] = makePetal(false);
-      ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.rotate(p.rot);
-      if (p.dust) {
-        ctx.fillStyle = 'rgba(255, 226, 170,' + p.a + ')';
-        ctx.beginPath(); ctx.arc(0, 0, p.s * 0.45, 0, TAU); ctx.fill();
-      } else {
-        ctx.fillStyle = 'hsla(42, 82%, 74%,' + p.a + ')';
-        for (let k = 0; k < 4; k++) {
-          ctx.rotate(Math.PI / 2);
-          ctx.beginPath();
-          ctx.ellipse(0, -p.s * 0.5, p.s * 0.38, p.s * 0.46, 0, 0, TAU);
-          ctx.fill();
-        }
-        ctx.fillStyle = 'rgba(255, 240, 200, 0.55)';
-        ctx.beginPath(); ctx.arc(0, 0, p.s * 0.2, 0, TAU); ctx.fill();
-      }
-      ctx.restore();
-    }
-  }
-
-  function drawParticles() {
-    if (CFG.glow) ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < P.count; i++) {
-      const a = P.alpha[i];
-      if (a < 0.04) continue;
-      const r = P.size[i];
-      ctx.fillStyle = 'hsla(' + P.hue[i] + ', 100%, 65%, ' + a + ')';
-      ctx.beginPath();
-      ctx.arc(P.x[i], P.y[i], r, 0, TAU);
-      ctx.fill();
-      if (CFG.glow && r > 1.3) {
-        ctx.globalAlpha = a * 0.18;
-        ctx.beginPath();
-        ctx.arc(P.x[i], P.y[i], r * 3, 0, TAU);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-      }
-    }
-    if (CFG.glow) ctx.globalCompositeOperation = 'source-over';
-  }
-
-  function drawFireworks() {
-    ctx.globalCompositeOperation = 'lighter';
-    for (let i = 0; i < FW.rockets.length; i++) {
-      const r = FW.rockets[i];
-      ctx.fillStyle = 'hsla(' + r.color.h + ', 100%, 88%, 1)';
-      ctx.beginPath();
-      ctx.arc(r.x, r.y, 2.4, 0, TAU);
-      ctx.fill();
-    }
-    for (let i = 0; i < FW.sparks.length; i++) {
-      const s = FW.sparks[i];
-      const life = s.life / s.maxLife;
-      if (life <= 0) continue;
-      ctx.fillStyle = 'hsla(' + s.color.h + ', ' + s.color.s + '%, ' + s.color.l + '%, ' + life + ')';
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, s.size * life, 0, TAU);
-      ctx.fill();
-    }
-    ctx.globalCompositeOperation = 'source-over';
-  }
-
-  let paused = false;
-  function loop(now) {
-    requestAnimationFrame(loop);
-    if (paused) { lastFrameTime = now; return; }
-    if (!lastFrameTime) lastFrameTime = now;
-    const diff = now - lastFrameTime;
-    if (diff < frameInterval * 0.85) return;
-    const dt = Math.min(0.05, diff / 1000);
-    lastFrameTime = now;
-    elapsed += dt;
-    updateState(dt);
-    render();
-  }
-  document.addEventListener('visibilitychange', function () {
-    paused = document.hidden;
-    if (!paused) lastFrameTime = 0;
-  });
-
-  const bgm = document.getElementById('bgm');
-  let audioUnlocked = false;
-  function tryPlayAudio() {
-    if (audioUnlocked) return;
-    bgm.volume = 0.55;
-    const pr = bgm.play();
-    if (pr && pr.catch) {
-      pr.catch(function () { });
-    }
-    audioUnlocked = true;
-  }
-  document.addEventListener('pointerdown', function () {
-    tryPlayAudio();
-  }, { once: true, passive: true });
-  document.addEventListener('touchstart', function () {
-    tryPlayAudio();
-  }, { once: true, passive: true });
-
-  let lastClick = 0;
-  document.addEventListener('pointerdown', function (e) {
-    const now = performance.now();
-    if (now - lastClick < 120) return;
-    lastClick = now;
-    launchFirework(e.clientX, e.clientY);
-  }, { passive: true });
-
-  function renderStatic() {
-    rainCtx.fillStyle = '#050a1e';
-    rainCtx.fillRect(0, 0, W, H);
-    ctx.clearRect(0, 0, W, H);
-    drawStars(0);
-    drawMoon();
-    const text = POEMS[0];
-    const idealPx = (W * 0.9) / text.length;
-    const minPx = W / 18;
-    const fs = Math.max(idealPx, minPx);
-    ctx.font = '900 ' + fs + 'px "Songti SC","SimSun","Noto Serif SC",serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(255, 200, 100, 0.9)';
-    ctx.shadowBlur = 24;
-    ctx.fillStyle = 'rgba(255, 232, 178, 0.96)';
-    ctx.fillText(text, W * 0.5, H * 0.5);
-    ctx.shadowBlur = 0;
-  }
-
-  function init() {
-    resize();
-    enterGalaxy();
-    tryPlayAudio();
-    if (prefersReduced) {
-      renderStatic();
-      return;
-    }
-    lastFrameTime = 0;
-    requestAnimationFrame(loop);
-  }
-  if (document.fonts && document.fonts.load) {
-    Promise.race([
-      Promise.all([
-        document.fonts.load('900 100px "Songti SC"'),
-        document.fonts.load('900 100px "Noto Serif SC"')
-      ]),
-      new Promise(function (r) { setTimeout(r, 1800); })
-    ]).then(init).catch(init);
-  } else {
-    init();
-  }
+  'use strict';
+  const TAU = Math.PI * 2;
+  const POEMS = [
+    '海上生明月，天涯共此时',
+    '但愿人长久，千里共婵娟',
+    '露从今夜白，月是故乡明',
+    '今夜月明人尽望，不知秋思落谁家',
+    '秋空明月悬，光彩露沾湿',
+    '圆魄上寒空，皆言四海同',
+    '明月出天山，苍茫云海间',
+    '春江潮水连海平，海上明月共潮生',
+    '举头望明月，低头思故乡',
+    '中庭地白树栖鸦，冷露无声湿桂花',
+    '星垂平野阔，月涌大江流',
+    '月落乌啼霜满天，江枫渔火对愁眠'
+  ];
+  const T_GALAXY    = 6;
+  const T_POEM_EACH = 3.5;
+  const T_POEM_ALL  = T_POEM_EACH * POEMS.length;
+  const T_FIREWORK  = 10;
+  const T_TOTAL     = T_GALAXY + T_POEM_ALL + T_FIREWORK;
+  const NEON = [
+    { h: 180, s: 100, l: 60 },
+    { h: 300, s: 100, l: 62 },
+    { h: 270, s: 100, l: 66 },
+    { h: 48,  s: 100, l: 60 },
+    { h: 140, s: 100, l: 56 },
+    { h: 25,  s: 100, l: 58 }
+  ];
+  /* ============================================================
+   * 1. 环境检测 & 性能分级
+   * ============================================================ */
+  const UA = navigator.userAgent;
+  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(UA);
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const TIERS = {
+    high: { particles: 6000, fps: 60, glow: true,  craters: true,  rainMul: 1.0, lanterns: 4, petals: 26, stars: 220, dprMax: 2.0 },
+    mid:  { particles: 3500, fps: 45, glow: true,  craters: false, rainMul: 0.7, lanterns: 3, petals: 16, stars: 130, dprMax: 1.5 },
+    low:  { particles: 1500, fps: 30, glow: false, craters: false, rainMul: 0.5, lanterns: 2, petals: 10, stars: 70,  dprMax: 1.2 }
+  };
+  function detectTier() {
+    const cores = navigator.hardwareConcurrency || 4;
+    const mem   = navigator.deviceMemory || 4;
+    let score = 0;
+    if (cores >= 8) score += 3; else if (cores >= 6) score += 2; else if (cores >= 4) score += 1;
+    if (mem >= 8) score += 2;   else if (mem >= 6) score += 1;
+    if (!isMobile) score += 2;
+    if (score >= 5) return 'high';
+    if (score >= 3) return 'mid';
+    return 'low';
+  }
+  const TIER = detectTier();
+  const CFG  = TIERS[TIER];
+  /* ============================================================
+   * 2. 画布
+   * ============================================================ */
+  const rainCanvas = document.getElementById('rain');
+  const rainCtx = rainCanvas.getContext('2d');
+  const scene = document.getElementById('scene');
+  const ctx = scene.getContext('2d', { alpha: true, desynchronized: true });
+  let W = 0, H = 0, DPR = 1;
+  /* ============================================================
+   * 3. 粒子池
+   * ============================================================ */
+  const MAX_P = CFG.particles;
+  const P = {
+    x: new Float32Array(MAX_P),
+    y: new Float32Array(MAX_P),
+    vx: new Float32Array(MAX_P),
+    vy: new Float32Array(MAX_P),
+    tx: new Float32Array(MAX_P),
+    ty: new Float32Array(MAX_P),
+    size: new Float32Array(MAX_P),
+    hue: new Float32Array(MAX_P),
+    alpha: new Float32Array(MAX_P),
+    mode: new Uint8Array(MAX_P),
+    count: MAX_P
+  };
+  /* ============================================================
+   * 4. 装饰元素
+   * ============================================================ */
+  let stars = [];
+  let lanterns = [];
+  let petals = [];
+  let rainCols = [];
+  const moon = { x: 0, y: 0, r: 0 };
+  /* ============================================================
+   * 5. 阶段 & 文字状态
+   * ============================================================ */
+  let elapsed = 0;
+  let phase = 'galaxy';
+  let poemIndex = -1;
+  let poemTextAlpha = 0;     /* 清晰文字层透明度：0~1 */
+  let lastFrameTime = 0;
+  let frameInterval = 1000 / CFG.fps;
+  /* 存储当前诗句的渲染参数，供清晰文字层使用 */
+  let currentPoem = {
+    text: '',
+    fontSize: 0
+  };
+  /* ============================================================
+   * 6. 初始化
+   * ============================================================ */
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, CFG.dprMax);
+    W = window.innerWidth;
+    H = window.innerHeight;
+    scene.width  = Math.round(W * DPR);
+    scene.height = Math.round(H * DPR);
+    scene.style.width  = W + 'px';
+    scene.style.height = H + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    rainCanvas.width  = Math.round(W * DPR);
+    rainCanvas.height = Math.round(H * DPR);
+    rainCanvas.style.width  = W + 'px';
+    rainCanvas.style.height = H + 'px';
+    rainCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    moon.r = Math.max(26, Math.min(W, H) * 0.09);
+    moon.x = W - moon.r - Math.max(18, W * 0.055);
+    moon.y = moon.r + Math.max(24, H * 0.045);
+    initStars();
+    initLanterns();
+    initPetals();
+    initRain();
+    if (phase === 'poem' && poemIndex >= 0) samplePoem();
+    rainCtx.fillStyle = '#050a1e';
+    rainCtx.fillRect(0, 0, W, H);
+  }
+  let resizeTimer = 0;
+  window.addEventListener('resize', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(resize, 180);
+  });
+  window.addEventListener('orientationchange', function () {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(resize, 260);
+  });
+  function initStars() {
+    stars = [];
+    for (let i = 0; i < CFG.stars; i++) {
+      stars.push({
+        x: Math.random() * W, y: Math.random() * H,
+        r: 0.4 + Math.random() * 1.2,
+        ph: Math.random() * TAU, sp: 0.6 + Math.random() * 1.6,
+        big: Math.random() < 0.08
+      });
+    }
+  }
+  function initLanterns() {
+    lanterns = [];
+    for (let i = 0; i < CFG.lanterns; i++) lanterns.push(makeLantern(true));
+  }
+  function makeLantern(anywhere) {
+    return {
+      x: W * (0.1 + Math.random() * 0.8),
+      y: anywhere ? H * (0.25 + Math.random() * 0.65) : H + 50,
+      ph: Math.random() * TAU, sp: 0.3 + Math.random() * 0.5,
+      r: Math.max(4, Math.min(W, H) * 0.012 * (0.8 + Math.random() * 0.6)),
+      hue: 26 + Math.random() * 18, a: 0.45 + Math.random() * 0.35
+    };
+  }
+  function initPetals() {
+    petals = [];
+    for (let i = 0; i < CFG.petals; i++) petals.push(makePetal(true));
+  }
+  function makePetal(anywhere) {
+    return {
+      x: Math.random() * W,
+      y: anywhere ? Math.random() * H : -20 - Math.random() * 40,
+      vy: 14 + Math.random() * 22, vx: -6 + Math.random() * 12,
+      rot: Math.random() * TAU, vr: -1.2 + Math.random() * 2.4,
+      s: 3 + Math.random() * 4, a: 0.22 + Math.random() * 0.3,
+      dust: Math.random() < 0.45
+    };
+  }
+  function initRain() {
+    rainCols = [];
+    const fs = Math.max(10, Math.round(W / 90));
+    const gap = Math.max(fs * 0.9, fs * 1.4 / CFG.rainMul);
+    for (let x = gap * 0.5; x < W; x += gap) {
+      rainCols.push({
+        x: x, y: Math.random() * H,
+        sp: 0.6 + Math.random() * 1.6,
+        len: 5 + Math.floor(Math.random() * 8),
+        fs: fs
+      });
+    }
+  }
+  /* ============================================================
+   * 7. 银河
+   * ============================================================ */
+  function enterGalaxy() {
+    phase = 'galaxy';
+    poemTextAlpha = 0;
+    const cx = W * 0.5, cy = H * 0.5;
+    const maxR = Math.min(W, H) * 0.48;
+    for (let i = 0; i < P.count; i++) {
+      const ang = Math.random() * TAU;
+      const r = Math.sqrt(Math.random()) * maxR;
+      P.x[i] = cx + Math.cos(ang) * r;
+      P.y[i] = cy + Math.sin(ang) * r;
+      P.vx[i] = 0; P.vy[i] = 0;
+      P.size[i] = 0.7 + Math.random() * 1.6;
+      P.hue[i]  = 35 + Math.random() * 25;
+      P.alpha[i] = 0.35 + Math.random() * 0.6;
+      P.mode[i] = 0;
+    }
+  }
+  /* ============================================================
+   * 8. 诗句采样
+   * ============================================================ */
+  let sampleCanvas = null;
+  let sampleCtx = null;
+  function samplePoem() {
+    const text = POEMS[poemIndex];
+    if (!text) return;
+    /* 保存当前诗句参数 */
+    const idealPx = (W * 0.88) / text.length;
+    const minPx   = W / 18;
+    const fontPx  = Math.max(idealPx, minPx);
+    currentPoem.text = text;
+    currentPoem.fontSize = fontPx;
+    /* 采样：分辨率提升到 0.75 倍 */
+    const scale = 0.75;
+    const sw = Math.max(1, Math.floor(W * scale));
+    const sh = Math.max(1, Math.floor(H * scale));
+    if (!sampleCanvas || sampleCanvas.width !== sw || sampleCanvas.height !== sh) {
+      sampleCanvas = document.createElement('canvas');
+      sampleCanvas.width = sw;
+      sampleCanvas.height = sh;
+      sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently: true });
+    }
+    sampleCtx.clearRect(0, 0, sw, sh);
+    const fs = fontPx * scale;
+    sampleCtx.font = '900 ' + fs + 'px "Songti SC","SimSun","Noto Serif SC",serif';
+    sampleCtx.textAlign = 'center';
+    sampleCtx.textBaseline = 'middle';
+    sampleCtx.fillStyle = '#fff';
+    sampleCtx.fillText(text, sw * 0.5, sh * 0.5);
+    const img = sampleCtx.getImageData(0, 0, sw, sh).data;
+    /* 阈值 150，去掉更多抗锯齿毛刺 */
+    const pts = [];
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        if (img[(y * sw + x) * 4 + 3] > 150) {
+          pts.push(x / scale, y / scale);
+        }
+      }
+    }
+    const M = pts.length / 2;
+    if (M === 0) return;
+    const N = P.count;
+    for (let i = 0; i < N; i++) {
+      const pi = Math.floor(i * M / N);
+      const bx = pts[pi * 2];
+      const by = pts[pi * 2 + 1];
+      P.tx[i] = bx + (Math.random() - 0.5) * 0.6;
+      P.ty[i] = by + (Math.random() - 0.5) * 0.6;
+      P.mode[i] = 1;
+      P.hue[i]  = 40 + Math.random() * 12;
+      /* 粒子更小，文字层负责清晰度，粒子负责点缀 */
+      P.size[i] = 0.35 + Math.random() * 0.35;
+      P.alpha[i] = 0.6 + Math.random() * 0.4;
+    }
+  }
+  /* ============================================================
+   * 9. 礼花
+   * ============================================================ */
+  const FW = { rockets: [], sparks: [] };
+  function launchFirework(tx, ty) {
+    const color = NEON[(Math.random() * NEON.length) | 0];
+    const startX = (tx != null) ? tx : W * (0.15 + Math.random() * 0.7);
+    const startY = H + 20;
+    const targetY = (ty != null)
+      ? Math.max(H * 0.08, Math.min(ty, H * 0.62))
+      : H * (0.12 + Math.random() * 0.3);
+    const gravity = 240;
+    const dy = Math.max(80, startY - targetY);
+    const vy = -Math.sqrt(2 * gravity * dy);
+    FW.rockets.push({
+      x: startX, y: startY,
+      vx: (Math.random() - 0.5) * 40,
+      vy: vy, targetY: targetY, gravity: gravity, color: color
+    });
+  }
+  function explodeFirework(r) {
+    const count = 48 + ((Math.random() * 30) | 0);
+    const speed = 150 + Math.random() * 110;
+    for (let i = 0; i < count; i++) {
+      const ang = (i / count) * TAU + (Math.random() - 0.5) * 0.12;
+      const sp  = speed * (0.6 + Math.random() * 0.4);
+      FW.sparks.push({
+        x: r.x, y: r.y,
+        vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+        life: 1.1 + Math.random() * 0.9, maxLife: 2.0,
+        size: 1.4 + Math.random() * 1.4, color: r.color
+      });
+    }
+  }
+  function updateFireworks(dt) {
+    for (let i = FW.rockets.length - 1; i >= 0; i--) {
+      const r = FW.rockets[i];
+      r.vy += r.gravity * dt;
+      r.x += r.vx * dt;
+      r.y += r.vy * dt;
+      if (r.vy >= 0 || r.y <= r.targetY) {
+        explodeFirework(r);
+        FW.rockets.splice(i, 1);
+      }
+    }
+    for (let i = FW.sparks.length - 1; i >= 0; i--) {
+      const s = FW.sparks[i];
+      s.vy += 130 * dt;
+      s.vx *= 0.985; s.vy *= 0.985;
+      s.x += s.vx * dt; s.y += s.vy * dt;
+      s.life -= dt;
+      if (s.life <= 0) FW.sparks.splice(i, 1);
+    }
+  }
+  /* ============================================================
+   * 10. 状态机
+   * ============================================================ */
+  let fwSpawnTimer = 0;
+  function updateState(dt) {
+    if (elapsed < T_GALAXY) {
+      if (phase !== 'galaxy') enterGalaxy();
+    } else if (elapsed < T_GALAXY + T_POEM_ALL) {
+      const idx = Math.floor((elapsed - T_GALAXY) / T_POEM_EACH);
+      if (phase !== 'poem' || idx !== poemIndex) {
+        phase = 'poem';
+        poemIndex = Math.min(idx, POEMS.length - 1);
+        poemTextAlpha = 0;
+        samplePoem();
+      }
+      /* 文字层渐显：1 秒内到位 */
+      if (poemTextAlpha < 1) {
+        poemTextAlpha = Math.min(1, poemTextAlpha + dt * 1.5);
+      }
+    } else if (elapsed < T_TOTAL) {
+      if (phase !== 'firework') {
+        phase = 'firework';
+        poemTextAlpha = 1;
+        fwSpawnTimer = 0;
+        for (let i = 0; i < 4; i++) {
+          setTimeout(function () { launchFirework(); }, i * 180);
+        }
+      }
+    } else {
+      if (phase !== 'ended') {
+        phase = 'ended';
+        document.getElementById('hint').classList.add('show');
+      }
+    }
+    if (phase === 'galaxy') {
+      updateGalaxy(dt);
+    } else if (phase === 'poem' || phase === 'firework' || phase === 'ended') {
+      updatePoem(dt);
+    }
+    if (phase === 'firework') {
+      fwSpawnTimer -= dt;
+      if (fwSpawnTimer <= 0) {
+        launchFirework();
+        if (Math.random() < 0.4) launchFirework();
+        fwSpawnTimer = 0.45 + Math.random() * 0.6;
+      }
+    }
+    updateFireworks(dt);
+  }
+  function updateGalaxy(dt) {
+    const cx = W * 0.5, cy = H * 0.5;
+    const base = 0.9;
+    for (let i = 0; i < P.count; i++) {
+      const dx = P.x[i] - cx;
+      const dy = P.y[i] - cy;
+      const r  = Math.sqrt(dx * dx + dy * dy) || 1;
+      const ang = Math.atan2(dy, dx) + base * (150 / (r + 100)) * dt;
+      const newR = r * (1 - 0.025 * dt);
+      P.x[i] = cx + Math.cos(ang) * newR;
+      P.y[i] = cy + Math.sin(ang) * newR;
+      P.alpha[i] = 0.35 + 0.5 * Math.abs(Math.sin(elapsed * 1.6 + i * 0.137));
+    }
+  }
+  /* ============================================================
+   * 11. 文字粒子物理
+   * ============================================================ */
+  function updatePoem(dt) {
+    const K = 10.0;
+    const DAMP = 0.85;
+    const JIT = 0.05;
+    for (let i = 0; i < P.count; i++) {
+      if (P.mode[i] !== 1) continue;
+      const dx = P.tx[i] - P.x[i];
+      const dy = P.ty[i] - P.y[i];
+      P.vx[i] = (P.vx[i] + dx * K * dt) * DAMP;
+      P.vy[i] = (P.vy[i] + dy * K * dt) * DAMP;
+      P.vx[i] += (Math.random() - 0.5) * JIT;
+      P.vy[i] += (Math.random() - 0.5) * JIT;
+      P.x[i] += P.vx[i];
+      P.y[i] += P.vy[i];
+    }
+  }
+  /* ============================================================
+   * 12. 渲染
+   * ============================================================ */
+  function render() {
+    drawRain();
+    ctx.clearRect(0, 0, W, H);
+    drawStars(elapsed);
+    drawMoon();
+    drawLanterns();
+    drawPetals();
+    drawPoemBackdrop();   /* ← 新增：清晰文字层（在粒子下面） */
+    drawParticles();
+    drawFireworks();
+  }
+  /* ============================================================
+   * 13. 清晰文字层 —— 核心新增
+   * ============================================================ */
+  function drawPoemBackdrop() {
+    if (phase !== 'poem' && phase !== 'firework' && phase !== 'ended') return;
+    if (!currentPoem.text) return;
+    const fs = currentPoem.fontSize;
+    const cx = W * 0.5, cy = H * 0.5;
+    ctx.save();
+    ctx.font = '900 ' + fs + 'px "Songti SC","SimSun","Noto Serif SC",serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    /* 主文字：柔和金色，透明度随 poemTextAlpha 渐显 */
+    ctx.globalAlpha = 0.55 * poemTextAlpha;
+    ctx.fillStyle = '#ffe6a8';
+    ctx.shadowColor = 'rgba(255, 180, 60, 0.95)';
+    ctx.shadowBlur = fs * 0.15;
+    ctx.fillText(currentPoem.text, cx, cy);
+    /* 描边：增强边缘清晰度 */
+    ctx.globalAlpha = 0.35 * poemTextAlpha;
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = Math.max(1, fs * 0.012);
+    ctx.strokeStyle = 'rgba(255, 220, 130, 0.9)';
+    ctx.strokeText(currentPoem.text, cx, cy);
+    ctx.restore();
+  }
+  function drawRain() {
+    rainCtx.fillStyle = 'rgba(5, 10, 30, 0.12)';
+    rainCtx.fillRect(0, 0, W, H);
+    rainCtx.textAlign = 'center';
+    for (let c = 0; c < rainCols.length; c++) {
+      const col = rainCols[c];
+      col.y += col.sp * 60 * (1 / CFG.fps);
+      if (col.y - col.len * col.fs > H) {
+        col.y = -Math.random() * 120;
+        col.sp = 0.6 + Math.random() * 1.6;
+        col.len = 5 + Math.floor(Math.random() * 8);
+      }
+      rainCtx.font = col.fs + 'px monospace';
+      for (let i = 0; i < col.len; i++) {
+        const yy = col.y - i * col.fs;
+        if (yy < -col.fs || yy > H + col.fs) continue;
+        const fade = 1 - i / col.len;
+        if (i === 0) rainCtx.fillStyle = 'rgba(180, 240, 255,' + (fade * 0.75) + ')';
+        else         rainCtx.fillStyle = 'rgba(70, 180, 220,'  + (fade * 0.45) + ')';
+        rainCtx.fillText(Math.random() < 0.5 ? '0' : '1', col.x, yy);
+      }
+    }
+  }
+  function drawStars(t) {
+    for (let i = 0; i < stars.length; i++) {
+      const s = stars[i];
+      const tw = 0.5 + 0.5 * Math.sin(t * s.sp + s.ph);
+      const a  = 0.2 + 0.55 * tw;
+      ctx.fillStyle = 'rgba(255, 245, 220,' + a + ')';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.r, 0, TAU);
+      ctx.fill();
+      if (s.big && tw > 0.65 && CFG.glow) {
+        ctx.globalAlpha = (tw - 0.65) * 0.6;
+        ctx.strokeStyle = 'rgba(255, 240, 200, 0.9)';
+        ctx.lineWidth = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(s.x - s.r * 3.5, s.y); ctx.lineTo(s.x + s.r * 3.5, s.y);
+        ctx.moveTo(s.x, s.y - s.r * 3.5); ctx.lineTo(s.x, s.y + s.r * 3.5);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+  function drawMoon() {
+    const x = moon.x, y = moon.y, r = moon.r;
+    if (CFG.glow) {
+      const g = ctx.createRadialGradient(x, y, r * 0.4, x, y, r * 3.2);
+      g.addColorStop(0, 'rgba(255, 225, 160, 0.32)');
+      g.addColorStop(1, 'rgba(255, 225, 160, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, r * 3.2, 0, TAU); ctx.fill();
+    }
+    const mg = ctx.createRadialGradient(x - r * 0.3, y - r * 0.32, r * 0.1, x, y, r);
+    mg.addColorStop(0,    '#fffbe9');
+    mg.addColorStop(0.62, '#ffe3a4');
+    mg.addColorStop(1,    '#e8b25a');
+    ctx.fillStyle = mg;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill();
+    if (CFG.craters) {
+      ctx.fillStyle = 'rgba(180, 130, 70, 0.22)';
+      const cr = [[-0.32, -0.28, 0.16], [0.28, 0.24, 0.11],
+                  [-0.08, 0.34, 0.10], [0.34, -0.14, 0.07]];
+      for (let i = 0; i < cr.length; i++) {
+        ctx.beginPath();
+        ctx.arc(x + cr[i][0] * r, y + cr[i][1] * r, cr[i][2] * r, 0, TAU);
+        ctx.fill();
+      }
+    }
+  }
+  function drawLanterns() {
+    for (let i = 0; i < lanterns.length; i++) {
+      const l = lanterns[i];
+      l.y -= 14 * (1 / CFG.fps) * 60 * 0.016;
+      l.ph += 0.016 * l.sp;
+      l.x += Math.sin(l.ph) * 0.4;
+      if (l.y < -60) lanterns[i] = makeLantern(false);
+      if (CFG.glow) {
+        const g = ctx.createRadialGradient(l.x, l.y, 0, l.x, l.y, l.r * 4.5);
+        g.addColorStop(0, 'hsla(' + l.hue + ',95%,60%,' + (0.35 * l.a) + ')');
+        g.addColorStop(1, 'hsla(40,95%,60%,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(l.x, l.y, l.r * 4.5, 0, TAU); ctx.fill();
+      }
+      ctx.fillStyle = 'hsla(' + l.hue + ',92%,70%,' + l.a + ')';
+      ctx.fillRect(l.x - l.r * 0.6, l.y - l.r * 0.9, l.r * 1.2, l.r * 1.6);
+      ctx.fillStyle = 'rgba(80,50,20,0.7)';
+      ctx.fillRect(l.x - l.r * 0.85, l.y - l.r * 1.0, l.r * 1.7, Math.max(1, l.r * 0.15));
+    }
+  }
+  function drawPetals() {
+    for (let i = 0; i < petals.length; i++) {
+      const p = petals[i];
+      p.y += p.vy * (1 / CFG.fps);
+      p.x += p.vx * (1 / CFG.fps) + Math.sin(p.rot * 2) * 0.3;
+      p.rot += p.vr * (1 / CFG.fps);
+      if (p.y > H + 30) petals[i] = makePetal(false);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      if (p.dust) {
+        ctx.fillStyle = 'rgba(255, 226, 170,' + p.a + ')';
+        ctx.beginPath(); ctx.arc(0, 0, p.s * 0.45, 0, TAU); ctx.fill();
+      } else {
+        ctx.fillStyle = 'hsla(42, 82%, 74%,' + p.a + ')';
+        for (let k = 0; k < 4; k++) {
+          ctx.rotate(Math.PI / 2);
+          ctx.beginPath();
+          ctx.ellipse(0, -p.s * 0.5, p.s * 0.38, p.s * 0.46, 0, 0, TAU);
+          ctx.fill();
+        }
+        ctx.fillStyle = 'rgba(255, 240, 200, 0.55)';
+        ctx.beginPath(); ctx.arc(0, 0, p.s * 0.2, 0, TAU); ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+  /* ============================================================
+   * 14. 粒子绘制
+   * ============================================================ */
+  function drawParticles() {
+    const isPoem = (phase === 'poem' || phase === 'firework' || phase === 'ended');
+    if (CFG.glow && !isPoem) {
+      ctx.globalCompositeOperation = 'lighter';
+    }
+    for (let i = 0; i < P.count; i++) {
+      const a = P.alpha[i];
+      if (a < 0.04) continue;
+      const r = P.size[i];
+      ctx.fillStyle = 'hsla(' + P.hue[i] + ', 100%, 70%, ' + a + ')';
+      ctx.beginPath();
+      ctx.arc(P.x[i], P.y[i], r, 0, TAU);
+      ctx.fill();
+      if (CFG.glow && r > 1.3 && !isPoem) {
+        ctx.globalAlpha = a * 0.18;
+        ctx.beginPath();
+        ctx.arc(P.x[i], P.y[i], r * 3, 0, TAU);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+    if (CFG.glow && !isPoem) ctx.globalCompositeOperation = 'source-over';
+  }
+  function drawFireworks() {
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < FW.rockets.length; i++) {
+      const r = FW.rockets[i];
+      ctx.fillStyle = 'hsla(' + r.color.h + ', 100%, 88%, 1)';
+      ctx.beginPath();
+      ctx.arc(r.x, r.y, 2.4, 0, TAU);
+      ctx.fill();
+    }
+    for (let i = 0; i < FW.sparks.length; i++) {
+      const s = FW.sparks[i];
+      const life = s.life / s.maxLife;
+      if (life <= 0) continue;
+      ctx.fillStyle = 'hsla(' + s.color.h + ', ' + s.color.s + '%, ' + s.color.l + '%, ' + life + ')';
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, s.size * life, 0, TAU);
+      ctx.fill();
+    }
+    ctx.globalCompositeOperation = 'source-over';
+  }
+  /* ============================================================
+   * 15. 主循环
+   * ============================================================ */
+  let paused = false;
+  function loop(now) {
+    requestAnimationFrame(loop);
+    if (paused) { lastFrameTime = now; return; }
+    if (!lastFrameTime) lastFrameTime = now;
+    const diff = now - lastFrameTime;
+    if (diff < frameInterval * 0.85) return;
+    const dt = Math.min(0.05, diff / 1000);
+    lastFrameTime = now;
+    elapsed += dt;
+    updateState(dt);
+    render();
+  }
+  document.addEventListener('visibilitychange', function () {
+    paused = document.hidden;
+    if (!paused) lastFrameTime = 0;
+  });
+  /* ============================================================
+   * 16. 背景音乐
+   * ============================================================ */
+  const bgm = document.getElementById('bgm');
+  let audioUnlocked = false;
+  function tryPlayAudio() {
+    if (audioUnlocked) return;
+    bgm.volume = 0.55;
+    const pr = bgm.play();
+    if (pr && pr.catch) pr.catch(function () {});
+    audioUnlocked = true;
+  }
+  document.addEventListener('pointerdown', function () {
+    tryPlayAudio();
+  }, { once: true, passive: true });
+  document.addEventListener('touchstart', function () {
+    tryPlayAudio();
+  }, { once: true, passive: true });
+  /* ============================================================
+   * 17. 手动礼花
+   * ============================================================ */
+  let lastClick = 0;
+  document.addEventListener('pointerdown', function (e) {
+    const now = performance.now();
+    if (now - lastClick < 120) return;
+    lastClick = now;
+    launchFirework(e.clientX, e.clientY);
+  }, { passive: true });
+  /* ============================================================
+   * 18. 静态兜底
+   * ============================================================ */
+  function renderStatic() {
+    rainCtx.fillStyle = '#050a1e';
+    rainCtx.fillRect(0, 0, W, H);
+    ctx.clearRect(0, 0, W, H);
+    drawStars(0);
+    drawMoon();
+    const text = POEMS[0];
+    const idealPx = (W * 0.88) / text.length;
+    const minPx = W / 18;
+    const fs = Math.max(idealPx, minPx);
+    ctx.font = '900 ' + fs + 'px "Songti SC","SimSun","Noto Serif SC",serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(255, 200, 100, 0.9)';
+    ctx.shadowBlur = 24;
+    ctx.fillStyle = 'rgba(255, 232, 178, 0.96)';
+    ctx.fillText(text, W * 0.5, H * 0.5);
+    ctx.shadowBlur = 0;
+  }
+  /* ============================================================
+   * 19. 启动
+   * ============================================================ */
+  function init() {
+    resize();
+    enterGalaxy();
+    tryPlayAudio();
+    if (prefersReduced) {
+      renderStatic();
+      return;
+    }
+    lastFrameTime = 0;
+    requestAnimationFrame(loop);
+  }
+  if (document.fonts && document.fonts.load) {
+    Promise.race([
+      Promise.all([
+        document.fonts.load('900 100px "Songti SC"'),
+        document.fonts.load('900 100px "Noto Serif SC"')
+      ]),
+      new Promise(function (r) { setTimeout(r, 1800); })
+    ]).then(init).catch(init);
+  } else {
+    init();
+  }
 })();
 </script>
 </body>
